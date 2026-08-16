@@ -1,0 +1,218 @@
+diff --git "a/.\\react_agent_fix\\mcp_server.before_multiuser.py" "b/.\\react_agent_fix\\mcp_server.py"
+index 9fc0e1b..b0aa217 100644
+--- "a/.\\react_agent_fix\\mcp_server.before_multiuser.py"
++++ "b/.\\react_agent_fix\\mcp_server.py"
+@@ -7,7 +7,9 @@ LocalFileStore 持久保存原始父文档。服务重启后两者仍能通过 d
+ from __future__ import annotations
+ 
+ import base64
++import binascii
+ import hashlib
++import hmac
+ import io
+ import json
+ import logging
+@@ -34,6 +36,9 @@ from langchain_core.messages import HumanMessage
+ from langchain_huggingface import HuggingFaceEmbeddings
+ from langchain_openai import ChatOpenAI
+ from langchain_text_splitters import RecursiveCharacterTextSplitter
++from mcp.server.auth.middleware.auth_context import get_access_token
++from mcp.server.auth.provider import AccessToken
++from mcp.server.auth.settings import AuthSettings
+ from mcp.server.fastmcp import FastMCP
+ from pdf2image import convert_from_path
+ from PIL import Image
+@@ -41,6 +46,7 @@ from PIL import Image
+ 
+ BASE_DIR = Path(__file__).resolve().parent
+ ENV_FILE_PATH = Path(r"D:\pycharm\langchain\Tool_Settings\Deepseek_API_Key.env")
++load_dotenv(ENV_FILE_PATH)
+ 
+ PDF_FILE_PATHS = (
+     Path(r"D:\pycharm\langchain\data\第一回：Matplotlib初识.pdf"),
+@@ -75,6 +81,18 @@ ENABLE_MODEL_ENRICHMENT = os.getenv(
+ MCP_HOST = "127.0.0.1"
+ MCP_PORT = 8000
+ MCP_PATH = "/mcp"
++KNOWLEDGE_BASE_ID = os.getenv(
++    "MATPLOTLIB_KNOWLEDGE_BASE_ID",
++    "matplotlib-course-v1",
++)
++MCP_TOKEN_AUDIENCE = "matplotlib-course-mcp"
++MCP_TOKEN_SECRET = os.getenv("MCP_TOKEN_SECRET", "")
++MCP_TOKEN_TTL_SECONDS = max(
++    300,
++    int(os.getenv("MCP_TOKEN_TTL_SECONDS", "3600")),
++)
++MCP_REQUIRED_SCOPE = "knowledge:read"
++IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
+ 
+ # RAG Fusion parameters are separate from index parameters.
+ FUSION_QUERY_COUNT = 3
+@@ -112,11 +130,104 @@ def configure_logging() -> logging.Logger:
+ 
+ LOGGER = configure_logging()
+ 
++
++def _decode_token_part(value: str) -> bytes:
++    padding = "=" * (-len(value) % 4)
++    return base64.urlsafe_b64decode(value + padding)
++
++
++def verify_context_token(token: str) -> dict[str, Any] | None:
++    """Verify the HMAC token carrying user/session/knowledge-base identity."""
++    if len(MCP_TOKEN_SECRET.encode("utf-8")) < 32:
++        return None
++    try:
++        payload_part, signature_part = token.split(".", 1)
++        expected = hmac.new(
++            MCP_TOKEN_SECRET.encode("utf-8"),
++            payload_part.encode("ascii"),
++            hashlib.sha256,
++        ).digest()
++        signature = _decode_token_part(signature_part)
++        if not hmac.compare_digest(signature, expected):
++            return None
++        payload = json.loads(_decode_token_part(payload_part))
++    except (ValueError, UnicodeError, binascii.Error, json.JSONDecodeError):
++        return None
++
++    if not isinstance(payload, dict):
++        return None
++    required = ("sub", "sid", "kb", "iat", "exp", "aud", "scopes")
++    if not all(key in payload for key in required):
++        return None
++    now = int(time.time())
++    try:
++        issued_at = int(payload["iat"])
++        expires_at = int(payload["exp"])
++    except (TypeError, ValueError):
++        return None
++    if payload["aud"] != MCP_TOKEN_AUDIENCE or expires_at <= now:
++        return None
++    if issued_at > now + 30 or expires_at - issued_at > 2 * MCP_TOKEN_TTL_SECONDS:
++        return None
++    if payload["kb"] != KNOWLEDGE_BASE_ID:
++        return None
++    if not isinstance(payload["scopes"], list) or not all(
++        isinstance(scope, str) for scope in payload["scopes"]
++    ):
++        return None
++    if MCP_REQUIRED_SCOPE not in payload["scopes"]:
++        return None
++    if not all(
++        isinstance(payload[key], str) and IDENTIFIER_PATTERN.fullmatch(payload[key])
++        for key in ("sub", "sid", "kb")
++    ):
++        return None
++    return payload
++
++
++class SignedContextTokenVerifier:
++    """FastMCP verifier for short-lived, HMAC-signed context tokens."""
++
++    async def verify_token(self, token: str) -> AccessToken | None:
++        payload = verify_context_token(token)
++        if payload is None:
++            LOGGER.warning("Rejected invalid or expired MCP access token")
++            return None
++        return AccessToken(
++            token=token,
++            client_id=str(payload["sub"]),
++            subject=str(payload["sub"]),
++            scopes=list(payload["scopes"]),
++            expires_at=int(payload["exp"]),
++            resource=KNOWLEDGE_BASE_ID,
++            claims=payload,
++        )
++
++
++def require_request_identity() -> tuple[str, str, str]:
++    """Read verified identity claims and enforce this server's knowledge base."""
++    access_token = get_access_token()
++    claims = access_token.claims if access_token else None
++    if not isinstance(claims, dict):
++        raise PermissionError("缺少已验证的 MCP 访问身份。")
++    user_id = str(claims.get("sub", ""))
++    session_id = str(claims.get("sid", ""))
++    knowledge_base_id = str(claims.get("kb", ""))
++    if knowledge_base_id != KNOWLEDGE_BASE_ID:
++        raise PermissionError("无权访问指定知识库。")
++    return user_id, session_id, knowledge_base_id
++
+ mcp = FastMCP(
+     "Matplotlib Course Knowledge",
+     instructions="提供 Matplotlib 中文课程私有 PDF 的多模态检索能力。",
+     log_level="INFO",
+     streamable_http_path=MCP_PATH,
++    token_verifier=SignedContextTokenVerifier(),
++    auth=AuthSettings(
++        issuer_url=f"http://{MCP_HOST}:{MCP_PORT}",
++        resource_server_url=f"http://{MCP_HOST}:{MCP_PORT}",
++        required_scopes=[MCP_REQUIRED_SCOPE],
++    ),
+ )
+ 
+ 
+@@ -840,14 +951,30 @@ def rag_fusion_search(query: str) -> tuple[list[str], list[tuple[Document, float
+ @mcp.tool()
+ def list_matplotlib_course_documents() -> str:
+     """列出私有 Matplotlib 课程 PDF、索引版本和各模态内容数量。"""
++    user_id, session_id, knowledge_base_id = require_request_identity()
++    LOGGER.info(
++        "Authorized manifest request user=%s session=%s kb=%s",
++        user_id,
++        session_id,
++        knowledge_base_id,
++    )
+     get_multi_vector_retriever()
+-    return json.dumps(read_manifest(), ensure_ascii=False)
++    manifest = read_manifest()
++    manifest["knowledge_base_id"] = knowledge_base_id
++    return json.dumps(manifest, ensure_ascii=False)
+ 
+ 
+ @mcp.tool()
+ def search_matplotlib_knowledge(query: str) -> str:
+     """检索私有 Matplotlib PDF，返回相关文本、表格或图片的文字化内容及来源。"""
+-    LOGGER.info("收到知识库检索请求：%s", query)
++    user_id, session_id, knowledge_base_id = require_request_identity()
++    LOGGER.info(
++        "收到知识库检索请求：user=%s session=%s kb=%s query=%s",
++        user_id,
++        session_id,
++        knowledge_base_id,
++        query,
++    )
+     queries, fused_documents = rag_fusion_search(query)
+     result = []
+     for rank, (document, score, matched_queries, query_ranks) in enumerate(fused_documents, start=1):
+@@ -871,10 +998,21 @@ def search_matplotlib_knowledge(query: str) -> str:
+         )
+     LOGGER.info("检索完成：query=%r，结果=%d", query, len(result))
+     LOGGER.info("RAG Fusion response original=%r queries=%s results=%d", query, queries, len(result))
+-    return json.dumps({"queries": queries, "results": result}, ensure_ascii=False)
++    return json.dumps(
++        {
++            "knowledge_base_id": knowledge_base_id,
++            "queries": queries,
++            "results": result,
++        },
++        ensure_ascii=False,
++    )
+ 
+ 
+ if __name__ == "__main__":
++    if len(MCP_TOKEN_SECRET.encode("utf-8")) < 32:
++        raise RuntimeError(
++            "MCP_TOKEN_SECRET 未配置或少于 32 字节；服务端拒绝以无鉴权模式启动。"
++        )
+     LOGGER.info("正在预热私有 PDF Multi-Vector 索引...")
+     try:
+         get_multi_vector_retriever()
+@@ -887,5 +1025,3 @@ if __name__ == "__main__":
+     except Exception:
+         LOGGER.exception("MCP 服务启动或运行失败。")
+         raise
+-
+-

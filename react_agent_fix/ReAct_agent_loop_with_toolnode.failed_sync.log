@@ -1,0 +1,95 @@
+2026-08-14 14:52:44,506 | ERROR | __main__ | 处理 Streamlit 请求失败，question='Matplotlib 课程有什么？'
+Traceback (most recent call last):
+  File "D:\pycharm\langchain\LangChain_project\ReAct_agent_loop_with_toolnode.py", line 771, in <module>
+    result = rag_chain_with_memory.invoke(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\base.py", line 6002, in invoke
+    return self.bound.invoke(
+           ^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\base.py", line 6002, in invoke
+    return self.bound.invoke(
+           ^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\base.py", line 3444, in invoke
+    input_ = context.run(step.invoke, input_, config)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\base.py", line 6002, in invoke
+    return self.bound.invoke(
+           ^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\base.py", line 5311, in invoke
+    return self._call_with_config(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\base.py", line 2289, in _call_with_config
+    context.run(
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\config.py", line 526, in call_func_with_variable_args
+    return func(input, **kwargs)  # type: ignore[call-arg]
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\base.py", line 5179, in _invoke
+    output = output.invoke(
+             ^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\base.py", line 6002, in invoke
+    return self.bound.invoke(
+           ^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\base.py", line 3444, in invoke
+    input_ = context.run(step.invoke, input_, config)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\pregel\main.py", line 3913, in invoke
+    for chunk in self.stream(
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\pregel\main.py", line 2967, in stream
+    for _ in runner.tick(
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\pregel\_runner.py", line 207, in tick
+    run_with_retry(
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\pregel\_retry.py", line 617, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\_internal\_runnable.py", line 707, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\_internal\_runnable.py", line 447, in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\prebuilt\tool_node.py", line 822, in _func
+    outputs = list(
+              ^^^^^
+  File "D:\python312\Lib\concurrent\futures\_base.py", line 619, in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\python312\Lib\concurrent\futures\_base.py", line 317, in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\python312\Lib\concurrent\futures\_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\python312\Lib\concurrent\futures\_base.py", line 401, in __get_result
+    raise self._exception
+  File "D:\python312\Lib\concurrent\futures\thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\runnables\config.py", line 650, in _wrapped_fn
+    return contexts.pop().run(fn, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\prebuilt\tool_node.py", line 1046, in _run_one
+    return self._execute_tool_sync(tool_request, input_type, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\prebuilt\tool_node.py", line 1006, in _execute_tool_sync
+    content = _handle_tool_error(e, flag=self._handle_tool_errors)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\prebuilt\tool_node.py", line 434, in _handle_tool_error
+    content = flag(e)  # type: ignore [assignment, call-arg]
+              ^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\prebuilt\tool_node.py", line 391, in _default_handle_tool_errors
+    raise e
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langgraph\prebuilt\tool_node.py", line 958, in _execute_tool_sync
+    response = tool.invoke(call_args, config)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\tools\base.py", line 766, in invoke
+    return self.run(tool_input, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\tools\base.py", line 1128, in run
+    raise error_to_raise
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\tools\base.py", line 1094, in run
+    response = context.run(self._run, *tool_args, **tool_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\langchain_core\tools\structured.py", line 99, in _run
+    raise NotImplementedError(msg)
+NotImplementedError: StructuredTool does not support sync invocation.
+During task with name 'tools' and id '8b135960-556f-2eb3-25f1-023d7e86c7cf'

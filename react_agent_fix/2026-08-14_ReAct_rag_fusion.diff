@@ -1,0 +1,26 @@
+diff --git "a/.\\react_agent_fix\\ReAct_agent_loop_with_toolnode.before_rag_fusion.py" "b/.\\react_agent_fix\\ReAct_agent_loop_with_toolnode.py"
+index 0c13366..58d4e55 100644
+--- "a/.\\react_agent_fix\\ReAct_agent_loop_with_toolnode.before_rag_fusion.py"
++++ "b/.\\react_agent_fix\\ReAct_agent_loop_with_toolnode.py"
+@@ -384,6 +384,10 @@ def safe_parse_tool_result(tool_output) -> list[dict]:
+         logger.warning("工具返回值不是合法 JSON: %s，原始内容: %s", e, str(content)[:200])
+         return []
+ 
++    # RAG Fusion returns generated queries together with the fused document list.
++    if isinstance(data, dict) and isinstance(data.get("results"), list):
++        data = data["results"]
++
+     if not isinstance(data, list):
+         logger.warning("工具返回值应为列表，实际为: %s", type(data))
+         return []
+@@ -456,6 +460,10 @@ def agent_node(state: AgentState, config: RunnableConfig):
+ 【之前已经尝试过的工具调用】：
+ {tool_history_str}
+ 
++RAG Fusion rule: call search_matplotlib_knowledge exactly once with the user's
++original question. The MCP server generates three rewrites, retrieves each one,
++and applies reciprocal-rank fusion internally; do not issue three tool calls.
++
+ 工具使用规则：
+ - 用户询问课程包含哪些 PDF、章节或索引状态时，调用 list_matplotlib_course_documents。
+ - 用户询问具体 Matplotlib 知识、代码、表格或图片内容时，调用 search_matplotlib_knowledge。

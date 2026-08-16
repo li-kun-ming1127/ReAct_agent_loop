@@ -1,0 +1,304 @@
+diff --git "a/C:\\Users\\\346\235\216\345\235\244\346\230\216\\Desktop\\\345\244\247\346\250\241\345\236\213\351\241\271\347\233\256\346\200\273\347\273\223\344\270\216\350\257\204\344\273\267\\react_agent_token_monitor\\ReAct_agent_loop_with_toolnode.before_context_window.py" "b/C:\\Users\\\346\235\216\345\235\244\346\230\216\\Desktop\\\345\244\247\346\250\241\345\236\213\351\241\271\347\233\256\346\200\273\347\273\223\344\270\216\350\257\204\344\273\267\\react_agent_token_monitor\\ReAct_agent_loop_with_toolnode.py"
+index 6630885..0b40da3 100644
+--- "a/C:\\Users\\\346\235\216\345\235\244\346\230\216\\Desktop\\\345\244\247\346\250\241\345\236\213\351\241\271\347\233\256\346\200\273\347\273\223\344\270\216\350\257\204\344\273\267\\react_agent_token_monitor\\ReAct_agent_loop_with_toolnode.before_context_window.py"
++++ "b/C:\\Users\\\346\235\216\345\235\244\346\230\216\\Desktop\\\345\244\247\346\250\241\345\236\213\351\241\271\347\233\256\346\200\273\347\273\223\344\270\216\350\257\204\344\273\267\\react_agent_token_monitor\\ReAct_agent_loop_with_toolnode.py"
+@@ -28,6 +28,7 @@ from dotenv import load_dotenv
+ from langchain_community.chat_message_histories import RedisChatMessageHistory
+ from langchain_core.callbacks import BaseCallbackHandler
+ from langchain_core.messages import AIMessage,HumanMessage,SystemMessage,ToolMessage
++from langchain_core.messages.utils import count_tokens_approximately
+ from langchain_core.output_parsers import StrOutputParser
+ from langchain_core.prompts import ChatPromptTemplate
+ from langchain_core.runnables import (
+@@ -69,8 +70,71 @@ MCP_TOKEN_TTL_SECONDS = max(300, int(os.getenv("MCP_TOKEN_TTL_SECONDS", "3600"))
+ APP_USER_TOKENS_JSON = os.getenv("APP_USER_TOKENS_JSON", "{}")
+ APP_USER_KB_ACCESS_JSON = os.getenv("APP_USER_KB_ACCESS_JSON", "{}")
+ IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
+-SUMMARY_THRESHOLD = 6
+-RECENT_KEEP_COUNT = 4
++# The API currently advertises a larger context window, but this application
++# keeps a bounded working window for latency, cost, tool schemas, and multi-agent growth.
++MODEL_CONTEXT_TOKENS = max(
++    32768,
++    int(os.getenv("MODEL_CONTEXT_TOKENS", "131072")),
++)
++OUTPUT_RESERVE_TOKENS = max(
++    1024,
++    int(os.getenv("OUTPUT_RESERVE_TOKENS", "8192")),
++)
++SAFETY_MARGIN_TOKENS = max(
++    2048,
++    int(os.getenv("CONTEXT_SAFETY_MARGIN_TOKENS", "8192")),
++)
++SYSTEM_RESERVE_TOKENS = max(
++    2048,
++    int(os.getenv("SYSTEM_RESERVE_TOKENS", "8192")),
++)
++MAX_CONTEXT_INPUT_TOKENS = max(
++    8192,
++    MODEL_CONTEXT_TOKENS
++    - OUTPUT_RESERVE_TOKENS
++    - SAFETY_MARGIN_TOKENS
++    - SYSTEM_RESERVE_TOKENS,
++)
++CONTEXT_INPUT_BUDGET_TOKENS = min(
++    MAX_CONTEXT_INPUT_TOKENS,
++    max(
++        8192,
++        int(
++            os.getenv(
++                "CONTEXT_INPUT_BUDGET_TOKENS",
++                str(MAX_CONTEXT_INPUT_TOKENS),
++            )
++        ),
++    ),
++)
++HISTORY_TARGET_TOKENS = min(
++    CONTEXT_INPUT_BUDGET_TOKENS,
++    max(8192, int(os.getenv("HISTORY_TARGET_TOKENS", "65536"))),
++)
++SUMMARY_INPUT_TOKENS = max(
++    2048,
++    int(os.getenv("SUMMARY_INPUT_TOKENS", "12000")),
++)
++SUMMARY_OUTPUT_TOKENS = max(
++    512,
++    int(os.getenv("SUMMARY_OUTPUT_TOKENS", "2048")),
++)
++MAX_HISTORY_MESSAGES = max(
++    12,
++    int(os.getenv("MAX_HISTORY_MESSAGES", "80")),
++)
++MIN_RECENT_TURNS = max(
++    1,
++    int(os.getenv("MIN_RECENT_TURNS", "2")),
++)
++TOKEN_ESTIMATE_CHARS_PER_TOKEN = max(
++    1.5,
++    float(os.getenv("TOKEN_ESTIMATE_CHARS_PER_TOKEN", "3.0")),
++)
++MAX_TOOL_MESSAGE_TOKENS = max(
++    1024,
++    int(os.getenv("MAX_TOOL_MESSAGE_TOKENS", "12000")),
++)
+ MCP_SERVER_URL = f"http://{MCP_HOST}:{MCP_PORT}{MCP_PATH}"
+ 
+ redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+@@ -483,6 +547,7 @@ try:
+         api_key=os.getenv("DEEPSEEK_API_KEY"),
+         base_url="https://api.deepseek.com/v1",
+         temperature=0,
++        max_tokens=OUTPUT_RESERVE_TOKENS,
+     )
+     tools = get_mcp_tools(
+         SESSION_CONTEXT,
+@@ -560,8 +625,67 @@ class AgentState(TypedDict):
+     retrieved_docs: list[Document]# 用于存储 RAG Fusion 融合后的文档列表，供前端展示
+ 
+ 
++def truncate_text(text: str, max_tokens: int) -> str:
++    """Conservatively truncate text while retaining both its beginning and end."""
++    max_chars = max(256, int(max_tokens * TOKEN_ESTIMATE_CHARS_PER_TOKEN))
++    if len(text) <= max_chars:
++        return text
++    head = max_chars * 2 // 3
++    tail = max_chars - head
++    return f"{text[:head]}\n...[内容已按 token 预算截断]...\n{text[-tail:]}"
++
++
++def estimate_message_tokens(messages: list, include_tools: bool = False) -> int:
++    """Estimate message and optional tool-schema tokens before an LLM call."""
++    return count_tokens_approximately(
++        messages,
++        chars_per_token=TOKEN_ESTIMATE_CHARS_PER_TOKEN,
++        tools=tools if include_tools else None,
++    )
++
++
++def split_into_turns(messages: list) -> list[list]:
++    """Group a human message and all following AI/tool messages into one turn."""
++    turns: list[list] = []
++    current: list = []
++    for message in messages:
++        if isinstance(message, SystemMessage):
++            continue
++        if isinstance(message, HumanMessage) and current:
++            turns.append(current)
++            current = []
++        current.append(message)
++    if current:
++        turns.append(current)
++    return turns
++
++
++def flatten_turns(turns: list[list]) -> list:
++    return [message for turn in turns for message in turn]
++
++
++def truncate_oversized_tool_messages(turns: list[list]) -> list[list]:
++    """Bound tool payloads without breaking tool-call/message relationships."""
++    bounded_turns: list[list] = []
++    for turn in turns:
++        bounded_turn: list = []
++        for message in turn:
++            if (
++                isinstance(message, ToolMessage)
++                and estimate_message_tokens([message]) > MAX_TOOL_MESSAGE_TOKENS
++            ):
++                bounded_content = truncate_text(
++                    str(message.content),
++                    MAX_TOOL_MESSAGE_TOKENS,
++                )
++                message = message.model_copy(update={"content": bounded_content})
++            bounded_turn.append(message)
++        bounded_turns.append(bounded_turn)
++    return bounded_turns
++
++
+ def format_messages_for_summary(messages: list) -> str:
+-    """将消息对象转换为适合摘要模型处理的纯文本。"""
++    """将完整对话轮次转换为受 token 预算限制的摘要输入。"""
+     formatted: list[str] = []
+     for message in messages:
+         if isinstance(message, HumanMessage):
+@@ -571,13 +695,21 @@ def format_messages_for_summary(messages: list) -> str:
+                 formatted.append(f"助手：{message.content}")
+             if message.tool_calls:
+                 formatted.append(f"[助手请求调用工具：{message.tool_calls}]")
++        elif isinstance(message, ToolMessage):
++            tool_name = getattr(message, "name", None) or "tool"
++            content = truncate_text(str(message.content), MAX_TOOL_MESSAGE_TOKENS)
++            formatted.append(f"工具[{tool_name}]：{content}")
+     return "\n".join(formatted)
+ 
+ summary_prompt = ChatPromptTemplate.from_messages([
+     ("system", "请用中文简洁地总结以下对话要点，突出技术问题与答案。"),
+     ("human", "{chat_history}"),
+ ])
+-summary_chain = summary_prompt | text_llm | StrOutputParser()
++summary_chain = (
++    summary_prompt
++    | text_llm.bind(max_tokens=SUMMARY_OUTPUT_TOKENS)
++    | StrOutputParser()
++)
+ 
+ def summarize_messages(
+     messages: list,
+@@ -591,6 +723,7 @@ def summarize_messages(
+     chat_history = new_history
+     if existing_summary:
+         chat_history = f"已有摘要：\n{existing_summary}\n\n新增对话：\n{new_history}"
++    chat_history = truncate_text(chat_history, SUMMARY_INPUT_TOKENS)
+     return summary_chain.invoke({"chat_history": chat_history})
+ 
+ 
+@@ -616,14 +749,27 @@ def get_session_history(session_id: str) -> RedisChatMessageHistory:
+ 
+ 
+ def compact_redis_history(session_id: str) -> None:
+-    """将较旧消息压缩到 Redis 摘要，仅保留最近的完整消息。"""
++    """按 token 预算压缩旧轮次，并保留最近的完整对话轮次。"""
+     history = get_session_history(session_id)
+     messages = history.messages
+-    if len(messages) <= SUMMARY_THRESHOLD:
++    turns = split_into_turns(messages)
++    if not turns:
+         return
+ 
+-    old_messages = messages[:-RECENT_KEEP_COUNT]
+-    recent_messages = messages[-RECENT_KEEP_COUNT:]
++    evicted_turns: list[list] = []
++    while len(turns) > MIN_RECENT_TURNS:
++        candidate = flatten_turns(turns)
++        over_tokens = estimate_message_tokens(candidate) > HISTORY_TARGET_TOKENS
++        over_count = len(candidate) > MAX_HISTORY_MESSAGES
++        if not over_tokens and not over_count:
++            break
++        evicted_turns.append(turns.pop(0))
++
++    if not evicted_turns:
++        return
++
++    old_messages = flatten_turns(evicted_turns)
++    recent_messages = flatten_turns(turns)
+     cached_summary, compacted_count = get_cached_summary(session_id)
+     new_summary = summarize_messages(old_messages, cached_summary)
+     set_cached_summary(
+@@ -636,6 +782,67 @@ def compact_redis_history(session_id: str) -> None:
+     history.add_messages(recent_messages)
+ 
+ 
++def build_model_context(
++    dynamic_system_prompt: str,
++    messages: list,
++    session_id: str,
++) -> list:
++    """Build a bounded context while preserving system messages and whole turns."""
++    historical_system = [
++        message for message in messages if isinstance(message, SystemMessage)
++    ]
++    turns = split_into_turns(messages)
++    if not turns:
++        return [SystemMessage(content=dynamic_system_prompt), *historical_system]
++
++    def candidate_messages() -> list:
++        return [
++            SystemMessage(content=dynamic_system_prompt),
++            *historical_system,
++            *flatten_turns(turns),
++        ]
++
++    evicted_turns: list[list] = []
++    while len(turns) > MIN_RECENT_TURNS and estimate_message_tokens(
++        candidate_messages(), include_tools=True
++    ) > CONTEXT_INPUT_BUDGET_TOKENS:
++        evicted_turns.append(turns.pop(0))
++
++    # The hard budget wins over the preferred minimum; always retain the
++    # current complete turn, but an unusually large previous turn may be evicted.
++    while len(turns) > 1 and estimate_message_tokens(
++        candidate_messages(), include_tools=True
++    ) > CONTEXT_INPUT_BUDGET_TOKENS:
++        evicted_turns.append(turns.pop(0))
++
++    if evicted_turns:
++        cached_summary, _ = get_cached_summary(session_id)
++        new_summary = summarize_messages(
++            flatten_turns(evicted_turns),
++            cached_summary,
++        )
++        historical_system = [
++            SystemMessage(content=f"历史对话摘要：\n{new_summary}")
++        ]
++
++    turns = truncate_oversized_tool_messages(turns)
++    context = candidate_messages()
++    estimated_tokens = estimate_message_tokens(context, include_tools=True)
++    if estimated_tokens > CONTEXT_INPUT_BUDGET_TOKENS:
++        raise RuntimeError(
++            "当前 system、工具定义和最近完整轮次超过上下文预算："
++            f"estimated={estimated_tokens}, budget={CONTEXT_INPUT_BUDGET_TOKENS}。"
++            "请降低单次工具结果、RAG top_k 或 MAX_TOOL_MESSAGE_TOKENS。"
++        )
++    logger.info(
++        "上下文预算：estimated=%d budget=%d turns=%d",
++        estimated_tokens,
++        CONTEXT_INPUT_BUDGET_TOKENS,
++        len(turns),
++    )
++    return context
++
++
+ logger = logging.getLogger(__name__)
+ if not logger.handlers:
+     logger.setLevel(logging.INFO)
+@@ -781,7 +988,8 @@ and applies reciprocal-rank fusion internally; do not issue three tool calls.
+ 回答结束时请说“感谢您的提问！”。"""
+ 
+     model = text_llm if has_tool_result else text_llm.bind_tools(tools)
+-    response = model.invoke([SystemMessage(content=system_prompt), *messages])
++    model_messages = build_model_context(system_prompt, messages, session_id)
++    response = model.invoke(model_messages)
+ 
+     # AIMessage.tool_calls 已由 LangChain 标准化为 ToolNode 所需的
+     # name / args / id 结构。不要重新组装，否则容易丢失协议字段。

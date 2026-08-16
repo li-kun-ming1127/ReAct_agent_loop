@@ -1,0 +1,201 @@
+2026-08-14 15:37:40,515 | INFO | matplotlib_mcp_server | 解析 PDF：第一回：Matplotlib初识.pdf（4 页）
+2026-08-14 15:37:42,773 | ERROR | matplotlib_mcp_server | 图片 OCR 失败。
+Traceback (most recent call last):
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 275, in run_tesseract
+    proc = subprocess.Popen(cmd_args, **subprocess_args())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\python312\Lib\subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "D:\python312\Lib\subprocess.py", line 1538, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [WinError 2] 系统找不到指定的文件。
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\李坤明\Desktop\大模型项目总结与评价\react_agent_fix\mcp_server.py", line 253, in ocr_image
+    return pytesseract.image_to_string(image, lang="chi_sim+eng").strip()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 486, in image_to_string
+    return {
+           ^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 489, in <lambda>
+    Output.STRING: lambda: run_and_get_output(*args),
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 352, in run_and_get_output
+    run_tesseract(**kwargs)
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 280, in run_tesseract
+    raise TesseractNotFoundError()
+pytesseract.pytesseract.TesseractNotFoundError: tesseract is not installed or it's not in your PATH. See README file for more information.
+2026-08-14 15:37:42,786 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=0
+2026-08-14 15:37:44,148 | ERROR | matplotlib_mcp_server | 图片 OCR 失败。
+Traceback (most recent call last):
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 275, in run_tesseract
+    proc = subprocess.Popen(cmd_args, **subprocess_args())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\python312\Lib\subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "D:\python312\Lib\subprocess.py", line 1538, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [WinError 2] 系统找不到指定的文件。
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\李坤明\Desktop\大模型项目总结与评价\react_agent_fix\mcp_server.py", line 253, in ocr_image
+    return pytesseract.image_to_string(image, lang="chi_sim+eng").strip()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 486, in image_to_string
+    return {
+           ^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 489, in <lambda>
+    Output.STRING: lambda: run_and_get_output(*args),
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 352, in run_and_get_output
+    run_tesseract(**kwargs)
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 280, in run_tesseract
+    raise TesseractNotFoundError()
+pytesseract.pytesseract.TesseractNotFoundError: tesseract is not installed or it's not in your PATH. See README file for more information.
+2026-08-14 15:37:44,148 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=0
+2026-08-14 15:37:45,586 | ERROR | matplotlib_mcp_server | 图片 OCR 失败。
+Traceback (most recent call last):
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 275, in run_tesseract
+    proc = subprocess.Popen(cmd_args, **subprocess_args())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\python312\Lib\subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "D:\python312\Lib\subprocess.py", line 1538, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [WinError 2] 系统找不到指定的文件。
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\李坤明\Desktop\大模型项目总结与评价\react_agent_fix\mcp_server.py", line 253, in ocr_image
+    return pytesseract.image_to_string(image, lang="chi_sim+eng").strip()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 486, in image_to_string
+    return {
+           ^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 489, in <lambda>
+    Output.STRING: lambda: run_and_get_output(*args),
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 352, in run_and_get_output
+    run_tesseract(**kwargs)
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 280, in run_tesseract
+    raise TesseractNotFoundError()
+pytesseract.pytesseract.TesseractNotFoundError: tesseract is not installed or it's not in your PATH. See README file for more information.
+2026-08-14 15:37:45,588 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=0
+2026-08-14 15:37:46,097 | ERROR | matplotlib_mcp_server | 图片 OCR 失败。
+Traceback (most recent call last):
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 275, in run_tesseract
+    proc = subprocess.Popen(cmd_args, **subprocess_args())
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\python312\Lib\subprocess.py", line 1026, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "D:\python312\Lib\subprocess.py", line 1538, in _execute_child
+    hp, ht, pid, tid = _winapi.CreateProcess(executable, args,
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [WinError 2] 系统找不到指定的文件。
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\李坤明\Desktop\大模型项目总结与评价\react_agent_fix\mcp_server.py", line 253, in ocr_image
+    return pytesseract.image_to_string(image, lang="chi_sim+eng").strip()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 486, in image_to_string
+    return {
+           ^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 489, in <lambda>
+    Output.STRING: lambda: run_and_get_output(*args),
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 352, in run_and_get_output
+    run_tesseract(**kwargs)
+  File "D:\pycharm\langchain\LangChain_project\venv312\Lib\site-packages\pytesseract\pytesseract.py", line 280, in run_tesseract
+    raise TesseractNotFoundError()
+pytesseract.pytesseract.TesseractNotFoundError: tesseract is not installed or it's not in your PATH. See README file for more information.
+2026-08-14 15:37:46,097 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=0
+2026-08-14 15:37:46,117 | INFO | matplotlib_mcp_server | PDF 抽取完成：第一回：Matplotlib初识.pdf，文本=0，表格=0，图片=6
+2026-08-14 15:38:26,706 | INFO | matplotlib_mcp_server | 解析 PDF：第一回：Matplotlib初识.pdf（4 页）
+2026-08-14 15:38:31,733 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=1230
+2026-08-14 15:38:35,808 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=1300
+2026-08-14 15:38:39,793 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=1415
+2026-08-14 15:38:41,424 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=129
+2026-08-14 15:38:41,437 | INFO | matplotlib_mcp_server | PDF 抽取完成：第一回：Matplotlib初识.pdf，文本=7，表格=0，图片=6
+2026-08-14 15:40:20,060 | INFO | matplotlib_mcp_server | 正在加载嵌入模型：D:\pycharm\langchain\models\text2vec-base-chinese
+2026-08-14 15:40:20,367 | INFO | matplotlib_mcp_server | 开始构建持久 Multi-Vector 索引：matplotlib_course_mv_e1071386f18c
+2026-08-14 15:40:20,367 | INFO | matplotlib_mcp_server | 解析 PDF：第一回：Matplotlib初识.pdf（4 页）
+2026-08-14 15:40:24,920 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=1230
+2026-08-14 15:40:28,847 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=1300
+2026-08-14 15:40:32,746 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=1415
+2026-08-14 15:40:34,595 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=129
+2026-08-14 15:40:34,605 | INFO | matplotlib_mcp_server | PDF 抽取完成：第一回：Matplotlib初识.pdf，文本=7，表格=0，图片=6
+2026-08-14 15:40:34,617 | INFO | matplotlib_mcp_server | 解析 PDF：第二回：艺术画笔见乾坤.pdf（13 页）
+2026-08-14 15:40:39,406 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=1288
+2026-08-14 15:40:43,742 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=1667
+2026-08-14 15:40:46,769 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=899
+2026-08-14 15:40:50,011 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=1064
+2026-08-14 15:40:55,164 | INFO | matplotlib_mcp_server | 第 5 页判定为扫描/低文本页，OCR 字符数=1482
+2026-08-14 15:40:59,428 | INFO | matplotlib_mcp_server | 第 6 页判定为扫描/低文本页，OCR 字符数=1405
+2026-08-14 15:41:03,189 | INFO | matplotlib_mcp_server | 第 7 页判定为扫描/低文本页，OCR 字符数=1239
+2026-08-14 15:41:07,672 | INFO | matplotlib_mcp_server | 第 8 页判定为扫描/低文本页，OCR 字符数=1529
+2026-08-14 15:41:11,856 | INFO | matplotlib_mcp_server | 第 9 页判定为扫描/低文本页，OCR 字符数=1503
+2026-08-14 15:41:15,798 | INFO | matplotlib_mcp_server | 第 10 页判定为扫描/低文本页，OCR 字符数=1414
+2026-08-14 15:41:22,014 | INFO | matplotlib_mcp_server | 第 11 页判定为扫描/低文本页，OCR 字符数=1623
+2026-08-14 15:41:27,874 | INFO | matplotlib_mcp_server | 第 12 页判定为扫描/低文本页，OCR 字符数=1775
+2026-08-14 15:41:31,960 | INFO | matplotlib_mcp_server | 第 13 页判定为扫描/低文本页，OCR 字符数=1178
+2026-08-14 15:41:32,037 | INFO | matplotlib_mcp_server | PDF 抽取完成：第二回：艺术画笔见乾坤.pdf，文本=23，表格=0，图片=21
+2026-08-14 15:41:32,042 | INFO | matplotlib_mcp_server | 解析 PDF：第三回：布局格式定方圆.pdf（5 页）
+2026-08-14 15:41:36,776 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=2034
+2026-08-14 15:41:39,346 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=612
+2026-08-14 15:41:44,551 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=3687
+2026-08-14 15:41:47,003 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=663
+2026-08-14 15:41:49,171 | INFO | matplotlib_mcp_server | 第 5 页判定为扫描/低文本页，OCR 字符数=808
+2026-08-14 15:41:49,220 | INFO | matplotlib_mcp_server | PDF 抽取完成：第三回：布局格式定方圆.pdf，文本=12，表格=0，图片=11
+2026-08-14 15:41:49,220 | INFO | matplotlib_mcp_server | 已禁用远程模型增强，文本和表格使用本地回退。
+2026-08-14 15:41:49,220 | INFO | matplotlib_mcp_server | 已禁用远程模型增强，文本和表格使用本地回退。
+2026-08-14 15:41:49,553 | INFO | matplotlib_mcp_server | 已禁用远程模型增强，图片使用 OCR 回退。
+2026-08-14 15:42:00,892 | INFO | matplotlib_mcp_server | Multi-Vector 索引构建完成：{'text': 42, 'table': 0, 'image': 38, 'parents': 80, 'vectors': 108}
+2026-08-14 15:42:48,603 | INFO | matplotlib_mcp_server | 正在加载嵌入模型：D:\pycharm\langchain\models\text2vec-base-chinese
+2026-08-14 15:42:48,920 | INFO | matplotlib_mcp_server | 复用持久 Multi-Vector 索引：collection=matplotlib_course_mv_e1071386f18c，向量=108
+2026-08-14 17:02:47,723 | INFO | matplotlib_mcp_server | 已禁用远程模型增强，文本和表格使用本地回退。
+2026-08-14 17:02:47,723 | WARNING | matplotlib_mcp_server | RAG Fusion query generation unavailable; using deterministic rewrites
+2026-08-14 17:02:47,735 | INFO | matplotlib_mcp_server | 正在加载嵌入模型：D:\pycharm\langchain\models\text2vec-base-chinese
+2026-08-14 17:02:47,995 | INFO | matplotlib_mcp_server | 开始构建持久 Multi-Vector 索引：matplotlib_course_mv_098f87590c58
+2026-08-14 17:02:47,999 | INFO | matplotlib_mcp_server | 解析 PDF：第一回：Matplotlib初识.pdf（4 页）
+2026-08-14 17:02:52,767 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=1230
+2026-08-14 17:02:56,948 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=1300
+2026-08-14 17:03:00,969 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=1415
+2026-08-14 17:03:02,857 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=129
+2026-08-14 17:03:02,871 | INFO | matplotlib_mcp_server | PDF 抽取完成：第一回：Matplotlib初识.pdf，文本=7，表格=0，图片=6
+2026-08-14 17:03:02,878 | INFO | matplotlib_mcp_server | 解析 PDF：第二回：艺术画笔见乾坤.pdf（13 页）
+2026-08-14 17:03:07,672 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=1288
+2026-08-14 17:03:12,060 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=1667
+2026-08-14 17:03:15,131 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=899
+2026-08-14 17:03:18,409 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=1064
+2026-08-14 17:03:23,155 | INFO | matplotlib_mcp_server | 第 5 页判定为扫描/低文本页，OCR 字符数=1482
+2026-08-14 17:03:28,010 | INFO | matplotlib_mcp_server | 第 6 页判定为扫描/低文本页，OCR 字符数=1405
+2026-08-14 17:03:31,799 | INFO | matplotlib_mcp_server | 第 7 页判定为扫描/低文本页，OCR 字符数=1239
+2026-08-14 17:03:36,433 | INFO | matplotlib_mcp_server | 第 8 页判定为扫描/低文本页，OCR 字符数=1529
+2026-08-14 17:03:40,590 | INFO | matplotlib_mcp_server | 第 9 页判定为扫描/低文本页，OCR 字符数=1503
+2026-08-14 17:03:44,381 | INFO | matplotlib_mcp_server | 第 10 页判定为扫描/低文本页，OCR 字符数=1414
+2026-08-14 17:03:50,339 | INFO | matplotlib_mcp_server | 第 11 页判定为扫描/低文本页，OCR 字符数=1623
+2026-08-14 17:03:56,054 | INFO | matplotlib_mcp_server | 第 12 页判定为扫描/低文本页，OCR 字符数=1775
+2026-08-14 17:03:59,976 | INFO | matplotlib_mcp_server | 第 13 页判定为扫描/低文本页，OCR 字符数=1178
+2026-08-14 17:04:00,049 | INFO | matplotlib_mcp_server | PDF 抽取完成：第二回：艺术画笔见乾坤.pdf，文本=23，表格=0，图片=21
+2026-08-14 17:04:00,049 | INFO | matplotlib_mcp_server | 解析 PDF：第三回：布局格式定方圆.pdf（5 页）
+2026-08-14 17:04:04,667 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=2034
+2026-08-14 17:04:07,103 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=612
+2026-08-14 17:04:12,172 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=3687
+2026-08-14 17:04:14,577 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=663
+2026-08-14 17:04:16,605 | INFO | matplotlib_mcp_server | 第 5 页判定为扫描/低文本页，OCR 字符数=808
+2026-08-14 17:04:16,658 | INFO | matplotlib_mcp_server | PDF 抽取完成：第三回：布局格式定方圆.pdf，文本=12，表格=0，图片=11
+2026-08-14 17:04:22,348 | INFO | matplotlib_mcp_server | Multi-Vector 索引构建完成：{'text': 42, 'table': 0, 'image': 38, 'parents': 80, 'vectors': 108}
+2026-08-14 17:04:22,503 | INFO | matplotlib_mcp_server | RAG Fusion retrieval query='subplot 子图布局怎么使用 Matplotlib 代码示例、参数和用法' hits=8
+2026-08-14 17:04:22,505 | INFO | matplotlib_mcp_server | RAG Fusion retrieval query='subplot 子图布局怎么使用 Matplotlib 原理和关键概念' hits=8
+2026-08-14 17:04:22,523 | INFO | matplotlib_mcp_server | RAG Fusion retrieval query='subplot 子图布局怎么使用' hits=8
+2026-08-14 17:04:22,523 | INFO | matplotlib_mcp_server | RAG Fusion complete original='subplot 子图布局怎么使用' queries=3 fused=8 elapsed_ms=170.5

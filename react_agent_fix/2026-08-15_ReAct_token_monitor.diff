@@ -1,0 +1,196 @@
+diff --git "a/.\\react_agent_token_monitor\\ReAct_agent_loop_with_toolnode.before_token_monitor.py" "b/.\\react_agent_token_monitor\\ReAct_agent_loop_with_toolnode.py"
+index 2d23304..6630885 100644
+--- "a/.\\react_agent_token_monitor\\ReAct_agent_loop_with_toolnode.before_token_monitor.py"
++++ "b/.\\react_agent_token_monitor\\ReAct_agent_loop_with_toolnode.py"
+@@ -15,6 +15,7 @@ import logging
+ import nest_asyncio
+ from dataclasses import dataclass
+ from pathlib import Path
++from threading import Lock
+ from typing import Annotated, Any, TypedDict
+ from langchain_chroma import Chroma
+ 
+@@ -269,10 +270,85 @@ def refresh_session_ttl(session_id: str) -> None:
+ 
+ 
+ class AgentMonitorHandler(BaseCallbackHandler):
+-    """记录 LangChain、模型和 MCP 工具的执行阶段与耗时。"""
++    """记录执行阶段、耗时，并累计本轮全部 LLM 调用的 token。"""
+ 
+     def __init__(self) -> None:
+         self.step_times: dict[Any, float] = {}
++        self._token_lock = Lock()
++        self._token_usage = {
++            "prompt_tokens": 0,
++            "completion_tokens": 0,
++            "total_tokens": 0,
++            "llm_calls": 0,
++        }
++
++    @staticmethod
++    def _normalize_token_usage(raw_usage: Any) -> dict[str, int]:
++        """兼容 OpenAI/DeepSeek 与 LangChain usage_metadata 字段名。"""
++        if not isinstance(raw_usage, dict):
++            return {
++                "prompt_tokens": 0,
++                "completion_tokens": 0,
++                "total_tokens": 0,
++            }
++
++        def non_negative_int(*keys: str) -> int:
++            for key in keys:
++                value = raw_usage.get(key)
++                try:
++                    return max(0, int(value))
++                except (TypeError, ValueError):
++                    continue
++            return 0
++
++        prompt_tokens = non_negative_int("prompt_tokens", "input_tokens")
++        completion_tokens = non_negative_int(
++            "completion_tokens",
++            "output_tokens",
++        )
++        total_tokens = non_negative_int("total_tokens")
++        if total_tokens == 0:
++            total_tokens = prompt_tokens + completion_tokens
++        return {
++            "prompt_tokens": prompt_tokens,
++            "completion_tokens": completion_tokens,
++            "total_tokens": total_tokens,
++        }
++
++    @classmethod
++    def _extract_token_usage(cls, response: Any) -> dict[str, int]:
++        """优先读取 LLMResult，缺失时回退到生成消息的元数据。"""
++        llm_output = getattr(response, "llm_output", None) or {}
++        if isinstance(llm_output, dict):
++            for key in ("token_usage", "usage"):
++                normalized = cls._normalize_token_usage(llm_output.get(key))
++                if normalized["total_tokens"] > 0:
++                    return normalized
++
++        for generation_group in getattr(response, "generations", []) or []:
++            for generation in generation_group or []:
++                message = getattr(generation, "message", None)
++                if message is None:
++                    continue
++                candidates = [getattr(message, "usage_metadata", None)]
++                response_metadata = getattr(message, "response_metadata", None)
++                if isinstance(response_metadata, dict):
++                    candidates.extend(
++                        [
++                            response_metadata.get("token_usage"),
++                            response_metadata.get("usage"),
++                        ]
++                    )
++                for candidate in candidates:
++                    normalized = cls._normalize_token_usage(candidate)
++                    if normalized["total_tokens"] > 0:
++                        return normalized
++        return cls._normalize_token_usage({})
++
++    def token_usage(self) -> dict[str, int]:
++        """返回线程安全的本轮 token 累计快照。"""
++        with self._token_lock:
++            return dict(self._token_usage)
+ 
+     def on_chain_start(self, serialized, inputs, **kwargs) -> None:
+         serialized = serialized or {}
+@@ -299,8 +375,29 @@ class AgentMonitorHandler(BaseCallbackHandler):
+         print(f"LLM 开始调用：提示数量 {len(prompts)}")
+ 
+     def on_llm_end(self, response, **kwargs) -> None:
+-        llm_output = response.llm_output or {}
+-        print(f"LLM 调用结束：token 用量 {llm_output.get('token_usage', {})}")
++        usage = self._extract_token_usage(response)
++        with self._token_lock:
++            self._token_usage["prompt_tokens"] += usage["prompt_tokens"]
++            self._token_usage["completion_tokens"] += usage["completion_tokens"]
++            self._token_usage["total_tokens"] += usage["total_tokens"]
++            self._token_usage["llm_calls"] += 1
++            accumulated = dict(self._token_usage)
++        logging.getLogger(__name__).info(
++            "LLM 调用结束：本次=%s，本轮累计=%s",
++            usage,
++            accumulated,
++        )
++        print(f"LLM 调用结束：本次 {usage} | 本轮累计 {accumulated}")
++
++
++def format_token_usage(usage: dict[str, int]) -> str:
++    """生成侧栏中稳定、紧凑的本轮 token 汇总文本。"""
++    if not usage:
++        return "暂无用量记录"
++    return (
++        "调用 {llm_calls} 次 · 输入 {prompt_tokens} · 输出 "
++        "{completion_tokens} · 合计 {total_tokens} tokens"
++    ).format(**usage)
+ 
+ 
+ AUTHENTICATED_USER_ID = require_authentication()
+@@ -799,10 +896,12 @@ def initialize_session_state() -> None:
+     st.session_state.setdefault("role_for_prompt", "beginner")
+     st.session_state.setdefault("messages", [])
+     st.session_state.setdefault("last_retrieved_docs", [])
++    st.session_state.setdefault("last_token_usage", {})
+     context_key = SESSION_CONTEXT.redis_session_id
+     if st.session_state.get("active_context_key") != context_key:
+         st.session_state.messages = []
+         st.session_state.last_retrieved_docs = []
++        st.session_state.last_token_usage = {}
+         st.session_state.active_context_key = context_key
+ 
+ 
+@@ -823,12 +922,14 @@ with st.sidebar:
+         st.session_state.browser_session_id = secrets.token_urlsafe(24)
+         st.session_state.messages = []
+         st.session_state.last_retrieved_docs = []
++        st.session_state.last_token_usage = {}
+         st.session_state.pop("active_context_key", None)
+         st.rerun()
+ 
+     if st.button("清空对话历史", width="stretch"):
+         st.session_state.messages = []
+         st.session_state.last_retrieved_docs = []
++        st.session_state.last_token_usage = {}
+         session_id = SESSION_CONTEXT.redis_session_id
+         get_session_history(session_id).clear()
+         redis_client.delete(
+@@ -844,6 +945,7 @@ with st.sidebar:
+         st.session_state.browser_session_id = secrets.token_urlsafe(24)
+         st.session_state.messages = []
+         st.session_state.last_retrieved_docs = []
++        st.session_state.last_token_usage = {}
+         st.rerun()
+ 
+     st.subheader("角色设定")
+@@ -859,6 +961,12 @@ with st.sidebar:
+         "通用": "user",
+     }[role_label]
+ 
++    st.subheader("本轮模型用量")
++    token_usage_placeholder = st.empty()
++    token_usage_placeholder.caption(
++        format_token_usage(st.session_state.last_token_usage)
++    )
++
+     st.subheader("最近检索的文档")
+     if st.session_state.last_retrieved_docs:
+         for index, document in enumerate(
+@@ -938,6 +1046,15 @@ if prompt := st.chat_input("请输入你的问题...", submit_mode="disable"):
+                 logger.exception("处理 Streamlit 请求失败，question=%r", prompt)
+                 answer = f"处理请求时出错：{exc}"
+                 st.session_state.last_retrieved_docs = []
++            st.session_state.last_token_usage = monitor.token_usage()
++            logger.info(
++                "本轮模型 token 汇总：session=%s usage=%s",
++                SESSION_CONTEXT.redis_session_id,
++                st.session_state.last_token_usage,
++            )
++            token_usage_placeholder.caption(
++                format_token_usage(st.session_state.last_token_usage)
++            )
+             st.write(answer)
+ 
+     st.session_state.messages.append((prompt, answer))

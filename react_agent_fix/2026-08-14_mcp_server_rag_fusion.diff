@@ -1,0 +1,187 @@
+diff --git "a/.\\react_agent_fix\\mcp_server.before_rag_fusion.py" "b/.\\react_agent_fix\\mcp_server.py"
+index c3424bd..86c26ea 100644
+--- "a/.\\react_agent_fix\\mcp_server.before_rag_fusion.py"
++++ "b/.\\react_agent_fix\\mcp_server.py"
+@@ -13,6 +13,7 @@ import json
+ import logging
+ import os
+ import re
++import time
+ from concurrent.futures import ThreadPoolExecutor
+ from functools import lru_cache
+ from logging.handlers import RotatingFileHandler
+@@ -75,6 +76,12 @@ MCP_HOST = "127.0.0.1"
+ MCP_PORT = 8000
+ MCP_PATH = "/mcp"
+ 
++# RAG Fusion parameters are separate from index parameters.
++FUSION_QUERY_COUNT = 3
++FUSION_RESULTS_PER_QUERY = 8
++FUSION_RRF_K = 60
++FUSION_TOP_K = 8
++
+ 
+ def configure_logging() -> logging.Logger:
+     """同时输出控制台日志和可轮转的持久日志。"""
+@@ -709,6 +716,127 @@ def read_manifest() -> dict[str, Any]:
+         return {}
+ 
+ 
++def _normalise_query(value: str) -> str:
++    return re.sub(r"\s+", " ", value.strip()).lower()
++
++
++def parse_fusion_queries(raw_content: str, original_query: str) -> list[str]:
++    """Parse an LLM response and always return three unique usable queries."""
++    cleaned = raw_content.strip()
++    if cleaned.startswith("```"):
++        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE)
++    candidates: list[str] = []
++    try:
++        parsed = json.loads(cleaned)
++        if isinstance(parsed, list):
++            candidates = [str(item).strip() for item in parsed]
++        elif isinstance(parsed, dict):
++            values = parsed.get("queries", parsed.get("rewrites", []))
++            if isinstance(values, list):
++                candidates = [str(item).strip() for item in values]
++    except json.JSONDecodeError:
++        candidates = [
++            re.sub(r"^\s*(?:[-*]|\d+[.)])\s*", "", line).strip()
++            for line in cleaned.splitlines()
++        ]
++
++    unique: list[str] = []
++    seen: set[str] = set()
++    for candidate in candidates:
++        key = _normalise_query(candidate)
++        if candidate and key not in seen:
++            seen.add(key)
++            unique.append(candidate)
++        if len(unique) == FUSION_QUERY_COUNT:
++            return unique
++
++    # Deterministic fallback keeps retrieval available for malformed/API-free responses.
++    fallbacks = [
++        original_query.strip(),
++        f"{original_query.strip()} Matplotlib 原理和关键概念",
++        f"{original_query.strip()} Matplotlib 代码示例、参数和用法",
++        f"{original_query.strip()} Matplotlib 常见问题和实践场景",
++    ]
++    for candidate in fallbacks:
++        key = _normalise_query(candidate)
++        if candidate and key not in seen:
++            seen.add(key)
++            unique.append(candidate)
++        if len(unique) == FUSION_QUERY_COUNT:
++            break
++    return unique
++
++
++@lru_cache(maxsize=256)
++def generate_fusion_queries(original_query: str) -> tuple[str, ...]:
++    """Ask the configured LLM for three semantic rewrites."""
++    query = original_query.strip()
++    if not query:
++        return ("Matplotlib", "Matplotlib 教程基础", "Matplotlib 绘图用法")
++    model = get_text_summary_model()
++    if model is None:
++        LOGGER.warning("RAG Fusion query generation unavailable; using deterministic rewrites")
++        return tuple(parse_fusion_queries("[]", query))
++    prompt = (
++        "Generate exactly 3 different Chinese search queries for the user's question. "
++        "Preserve Matplotlib entities, functions, and constraints; vary concept, "
++        "implementation, and practical-example angles. Return JSON array only.\n"
++        f"User question: {query}"
++    )
++    try:
++        response = model.invoke(prompt)
++        raw = response.content if isinstance(response.content, str) else str(response.content)
++        queries = parse_fusion_queries(raw, query)
++        LOGGER.info("RAG Fusion generated %d queries for %r: %s", len(queries), query, queries)
++        return tuple(queries)
++    except Exception:
++        LOGGER.exception("RAG Fusion query generation failed; using deterministic rewrites")
++        return tuple(parse_fusion_queries("[]", query))
++
++
++def reciprocal_rank_fusion(
++    query_results: list[tuple[str, list[Document]]],
++    rrf_k: int = FUSION_RRF_K,
++    top_k: int = FUSION_TOP_K,
++) -> list[tuple[Document, float, list[str], dict[str, int]]]:
++    """Merge ranked lists by stable doc_id using score=sum(1/(k+rank))."""
++    merged: dict[str, dict[str, Any]] = {}
++    for query, documents in query_results:
++        for rank, document in enumerate(documents, start=1):
++            metadata = dict(document.metadata)
++            key = str(metadata.get("doc_id") or hashlib.sha256(document.page_content.encode("utf-8")).hexdigest())
++            entry = merged.setdefault(key, {"document": document, "score": 0.0, "queries": [], "ranks": {}})
++            entry["score"] += 1.0 / (rrf_k + rank)
++            entry["queries"].append(query)
++            entry["ranks"][query] = rank
++    ordered = sorted(merged.values(), key=lambda item: (-item["score"], min(item["ranks"].values())))
++    return [
++        (item["document"], item["score"], item["queries"], item["ranks"])
++        for item in ordered[:top_k]
++    ]
++
++
++def rag_fusion_search(query: str) -> tuple[list[str], list[tuple[Document, float, list[str], dict[str, int]]]]:
++    """Generate three queries, retrieve them concurrently, then apply RRF."""
++    queries = list(generate_fusion_queries(query))[:FUSION_QUERY_COUNT]
++    retriever = get_multi_vector_retriever()
++    started = time.perf_counter()
++
++    def retrieve(one_query: str) -> tuple[str, list[Document]]:
++        documents = retriever.invoke(one_query)[:FUSION_RESULTS_PER_QUERY]
++        LOGGER.info("RAG Fusion retrieval query=%r hits=%d", one_query, len(documents))
++        return one_query, documents
++
++    with ThreadPoolExecutor(max_workers=len(queries)) as executor:
++        query_results = list(executor.map(retrieve, queries))
++    fused = reciprocal_rank_fusion(query_results)
++    LOGGER.info(
++        "RAG Fusion complete original=%r queries=%d fused=%d elapsed_ms=%.1f",
++        query, len(queries), len(fused), (time.perf_counter() - started) * 1000,
++    )
++    return queries, fused
++
++
+ @mcp.tool()
+ def list_matplotlib_course_documents() -> str:
+     """列出私有 Matplotlib 课程 PDF、索引版本和各模态内容数量。"""
+@@ -720,20 +848,30 @@ def list_matplotlib_course_documents() -> str:
+ def search_matplotlib_knowledge(query: str) -> str:
+     """检索私有 Matplotlib PDF，返回相关文本、表格或图片的文字化内容及来源。"""
+     LOGGER.info("收到知识库检索请求：%s", query)
+-    documents = get_multi_vector_retriever().invoke(query)
++    queries, fused_documents = rag_fusion_search(query)
+     result = []
+-    for document in documents:
++    for rank, (document, score, matched_queries, query_ranks) in enumerate(fused_documents, start=1):
+         metadata = dict(document.metadata)
++        metadata["fusion_score"] = score
++        metadata["fusion_rank"] = rank
++        metadata["fusion_query_ranks"] = query_ranks
+         result.append(
+             {
+                 "type": metadata.get("type", "text"),
+                 "content": document.page_content,
+                 "summary": metadata.get("summary", ""),
+                 "metadata": metadata,
++                "fusion": {
++                    "score": score,
++                    "rank": rank,
++                    "matched_queries": matched_queries,
++                    "query_ranks": query_ranks,
++                },
+             }
+         )
+     LOGGER.info("检索完成：query=%r，结果=%d", query, len(result))
+-    return json.dumps(result, ensure_ascii=False)
++    LOGGER.info("RAG Fusion response original=%r queries=%s results=%d", query, queries, len(result))
++    return json.dumps({"queries": queries, "results": result}, ensure_ascii=False)
+ 
+ 
+ if __name__ == "__main__":

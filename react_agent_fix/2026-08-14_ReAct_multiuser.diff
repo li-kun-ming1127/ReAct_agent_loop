@@ -1,0 +1,426 @@
+diff --git "a/.\\react_agent_fix\\ReAct_agent_loop_with_toolnode.before_multiuser.py" "b/.\\react_agent_fix\\ReAct_agent_loop_with_toolnode.py"
+index 58d4e55..2d23304 100644
+--- "a/.\\react_agent_fix\\ReAct_agent_loop_with_toolnode.before_multiuser.py"
++++ "b/.\\react_agent_fix\\ReAct_agent_loop_with_toolnode.py"
+@@ -3,11 +3,17 @@
+ from __future__ import annotations
+ 
+ import asyncio
++import base64
++import hashlib
++import hmac
+ import os
++import re
++import secrets
+ import time
+ import json
+ import logging
+ import nest_asyncio
++from dataclasses import dataclass
+ from pathlib import Path
+ from typing import Annotated, Any, TypedDict
+ from langchain_chroma import Chroma
+@@ -39,6 +45,9 @@ from langchain_core.documents import Document
+ 
+ 
+ from mcp_server import (
++    KNOWLEDGE_BASE_ID,
++    MCP_REQUIRED_SCOPE,
++    MCP_TOKEN_AUDIENCE,
+     MCP_HOST,
+     MCP_PATH,
+     MCP_PORT,
+@@ -49,8 +58,16 @@ st.set_page_config(page_title="Matplotlib 教学助手", layout="wide")
+ ENV_FILE_PATH = Path(
+     r"D:\pycharm\langchain\Tool_Settings\Deepseek_API_Key.env"
+ )
+-REDIS_URL = "redis://localhost:6379/0"
+-SESSION_ID = "user123"
++load_dotenv(ENV_FILE_PATH)
++
++REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
++REDIS_TTL_SECONDS = max(300, int(os.getenv("REDIS_TTL_SECONDS", "604800")))
++REDIS_KEY_PREFIX = "rag_chat:v2"
++MCP_TOKEN_SECRET = os.getenv("MCP_TOKEN_SECRET", "")
++MCP_TOKEN_TTL_SECONDS = max(300, int(os.getenv("MCP_TOKEN_TTL_SECONDS", "3600")))
++APP_USER_TOKENS_JSON = os.getenv("APP_USER_TOKENS_JSON", "{}")
++APP_USER_KB_ACCESS_JSON = os.getenv("APP_USER_KB_ACCESS_JSON", "{}")
++IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
+ SUMMARY_THRESHOLD = 6
+ RECENT_KEEP_COUNT = 4
+ MCP_SERVER_URL = f"http://{MCP_HOST}:{MCP_PORT}{MCP_PATH}"
+@@ -58,11 +75,162 @@ MCP_SERVER_URL = f"http://{MCP_HOST}:{MCP_PORT}{MCP_PATH}"
+ redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+ 
+ 
++@dataclass(frozen=True)
++class SessionContext:
++    user_id: str
++    browser_session_id: str
++    knowledge_base_id: str
++
++    @property
++    def redis_session_id(self) -> str:
++        return (
++            f"kb={self.knowledge_base_id}:user={self.user_id}:"
++            f"session={self.browser_session_id}"
++        )
++
++
++def _load_json_object(raw_value: str, variable_name: str) -> dict:
++    try:
++        value = json.loads(raw_value)
++    except json.JSONDecodeError as exc:
++        raise RuntimeError(f"{variable_name} 不是合法 JSON。") from exc
++    if not isinstance(value, dict):
++        raise RuntimeError(f"{variable_name} 必须是 JSON 对象。")
++    return value
++
++
++def load_user_token_hashes() -> dict[str, str]:
++    """Load user -> SHA-256(access token) mappings from environment."""
++    configured = _load_json_object(APP_USER_TOKENS_JSON, "APP_USER_TOKENS_JSON")
++    result: dict[str, str] = {}
++    for user_id, token_hash in configured.items():
++        normalized_user = str(user_id).strip()
++        normalized_hash = str(token_hash).strip().lower()
++        if not IDENTIFIER_PATTERN.fullmatch(normalized_user):
++            raise RuntimeError(f"非法用户 ID：{normalized_user!r}")
++        if not re.fullmatch(r"[0-9a-f]{64}", normalized_hash):
++            raise RuntimeError(
++                f"用户 {normalized_user!r} 的访问令牌必须保存为 SHA-256 十六进制摘要。"
++            )
++        result[normalized_user] = normalized_hash
++    return result
++
++
++def allowed_knowledge_bases(user_id: str) -> list[str]:
++    """Return the knowledge bases an authenticated user may select."""
++    access_map = _load_json_object(
++        APP_USER_KB_ACCESS_JSON,
++        "APP_USER_KB_ACCESS_JSON",
++    )
++    configured = access_map.get(
++        user_id,
++        [] if access_map else [KNOWLEDGE_BASE_ID],
++    )
++    if not isinstance(configured, list):
++        raise RuntimeError(f"用户 {user_id!r} 的知识库权限必须是 JSON 数组。")
++    return [
++        knowledge_base_id
++        for knowledge_base_id in map(str, configured)
++        if knowledge_base_id == KNOWLEDGE_BASE_ID
++    ]
++
++
++def require_authentication() -> str:
++    """Render a fail-closed token login before loading models or MCP tools."""
++    if len(MCP_TOKEN_SECRET.encode("utf-8")) < 32:
++        st.error("服务未配置有效的 `MCP_TOKEN_SECRET`，已拒绝启动未鉴权客户端。")
++        st.stop()
++
++    try:
++        user_hashes = load_user_token_hashes()
++    except RuntimeError as exc:
++        st.error(str(exc))
++        st.stop()
++    if not user_hashes:
++        st.error("未配置 `APP_USER_TOKENS_JSON`，当前没有可登录用户。")
++        st.stop()
++
++    st.session_state.setdefault(
++        "browser_session_id",
++        secrets.token_urlsafe(24),
++    )
++    authenticated_user_id = st.session_state.get("authenticated_user_id")
++    authenticated_token_hash = st.session_state.get("authenticated_token_hash")
++    if (
++        authenticated_user_id in user_hashes
++        and hmac.compare_digest(
++            str(authenticated_token_hash),
++            user_hashes[str(authenticated_user_id)],
++        )
++    ):
++        return str(authenticated_user_id)
++
++    st.title("Matplotlib 课程智能助手")
++    with st.form("login_form"):
++        user_id = st.text_input("用户 ID")
++        access_token = st.text_input("访问令牌", type="password")
++        submitted = st.form_submit_button("登录", width="stretch")
++    if submitted:
++        normalized_user = user_id.strip()
++        expected_hash = user_hashes.get(normalized_user, "0" * 64)
++        actual_hash = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
++        if normalized_user in user_hashes and hmac.compare_digest(actual_hash, expected_hash):
++            st.session_state.authenticated_user_id = normalized_user
++            st.session_state.authenticated_token_hash = expected_hash
++            st.session_state.messages = []
++            st.session_state.last_retrieved_docs = []
++            st.rerun()
++        st.error("用户 ID 或访问令牌错误。")
++    st.stop()
++
++
++def current_session_context(user_id: str) -> SessionContext:
++    allowed = allowed_knowledge_bases(user_id)
++    if not allowed:
++        raise PermissionError("当前用户没有任何知识库访问权限。")
++    selected = st.session_state.get("knowledge_base_id", allowed[0])
++    if selected not in allowed:
++        selected = allowed[0]
++        st.session_state.knowledge_base_id = selected
++    return SessionContext(
++        user_id=user_id,
++        browser_session_id=str(st.session_state.browser_session_id),
++        knowledge_base_id=str(selected),
++    )
++
++
++def _base64url(value: bytes) -> str:
++    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
++
++
++def create_mcp_context_token(context: SessionContext, token_window: int) -> str:
++    """Create a short-lived HMAC token; credentials never enter the LLM prompt."""
++    expires_at = (token_window + 2) * MCP_TOKEN_TTL_SECONDS
++    payload = {
++        "sub": context.user_id,
++        "sid": context.browser_session_id,
++        "kb": context.knowledge_base_id,
++        "aud": MCP_TOKEN_AUDIENCE,
++        "scopes": [MCP_REQUIRED_SCOPE],
++        "iat": token_window * MCP_TOKEN_TTL_SECONDS,
++        "exp": expires_at,
++    }
++    payload_part = _base64url(
++        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
++    )
++    signature = hmac.new(
++        MCP_TOKEN_SECRET.encode("utf-8"),
++        payload_part.encode("ascii"),
++        hashlib.sha256,
++    ).digest()
++    return f"{payload_part}.{_base64url(signature)}"
++
++
+ def get_cached_summary(session_id: str) -> tuple[str | None, int]:
+     """读取指定会话的摘要及累计压缩消息数。"""
+-    summary = redis_client.get(f"rag_chat:summary:{session_id}")
++    summary = redis_client.get(f"{REDIS_KEY_PREFIX}:summary:{session_id}")
+     compacted_count = redis_client.get(
+-        f"rag_chat:summary_until:{session_id}"
++        f"{REDIS_KEY_PREFIX}:summary_until:{session_id}"
+     )
+     return summary, int(compacted_count or 0)
+ 
+@@ -73,11 +241,31 @@ def set_cached_summary(
+     compacted_count: int,
+ ) -> None:
+     """将会话摘要和压缩进度写入 Redis。"""
+-    redis_client.set(f"rag_chat:summary:{session_id}", summary)
+-    redis_client.set(
+-        f"rag_chat:summary_until:{session_id}",
+-        str(compacted_count),
++    with redis_client.pipeline() as pipeline:
++        pipeline.setex(
++            f"{REDIS_KEY_PREFIX}:summary:{session_id}",
++            REDIS_TTL_SECONDS,
++            summary,
++        )
++        pipeline.setex(
++            f"{REDIS_KEY_PREFIX}:summary_until:{session_id}",
++            REDIS_TTL_SECONDS,
++            str(compacted_count),
++        )
++        pipeline.execute()
++
++
++def refresh_session_ttl(session_id: str) -> None:
++    """Refresh TTL for all Redis records belonging to one isolated session."""
++    keys = (
++        f"{REDIS_KEY_PREFIX}:history:{session_id}",
++        f"{REDIS_KEY_PREFIX}:summary:{session_id}",
++        f"{REDIS_KEY_PREFIX}:summary_until:{session_id}",
+     )
++    with redis_client.pipeline() as pipeline:
++        for key in keys:
++            pipeline.expire(key, REDIS_TTL_SECONDS)
++        pipeline.execute()
+ 
+ 
+ class AgentMonitorHandler(BaseCallbackHandler):
+@@ -115,6 +303,12 @@ class AgentMonitorHandler(BaseCallbackHandler):
+         print(f"LLM 调用结束：token 用量 {llm_output.get('token_usage', {})}")
+ 
+ 
++AUTHENTICATED_USER_ID = require_authentication()
++try:
++    SESSION_CONTEXT = current_session_context(AUTHENTICATED_USER_ID)
++except (RuntimeError, PermissionError) as exc:
++    st.error(str(exc))
++    st.stop()
+ 
+ 
+ 
+@@ -133,23 +327,35 @@ embedding = get_embedding()
+ 
+ nest_asyncio.apply()
+ 
+-async def _discover_mcp_tools():
++async def _discover_mcp_tools(
++    context: SessionContext,
++    token_window: int,
++):
++    context_token = create_mcp_context_token(context, token_window)
+     client = MultiServerMCPClient(
+         {
+             "matplotlib_knowledge": {
+                 "url": MCP_SERVER_URL,
+                 "transport": "streamable_http",
++                "headers": {
++                    "Authorization": f"Bearer {context_token}",
++                },
+             }
+         }
+     )
+     return await client.get_tools()
+ 
+-def _sync_discover_mcp_tools():
++def _sync_discover_mcp_tools(
++    context: SessionContext,
++    token_window: int,
++):
+     """同步封装异步函数，避免 Streamlit 和 asyncio 循环冲突"""
+     loop = asyncio.new_event_loop()
+     asyncio.set_event_loop(loop)
+     try:
+-        return loop.run_until_complete(_discover_mcp_tools())
++        return loop.run_until_complete(
++            _discover_mcp_tools(context, token_window)
++        )
+     finally:
+         loop.close()
+ 
+@@ -164,22 +370,27 @@ def run_coroutine_sync(coroutine):
+ 
+ 
+ @st.cache_resource(show_spinner="正在连接本机 MCP 知识库服务...")
+-def get_mcp_tools():
+-    discovered_tools = _sync_discover_mcp_tools()
++def get_mcp_tools(
++    context: SessionContext,
++    token_window: int,
++):
++    discovered_tools = _sync_discover_mcp_tools(context, token_window)
+     if not discovered_tools:
+         raise RuntimeError("MCP 服务未返回任何可用工具。")
+     return discovered_tools
+ 
+ 
+ try:
+-    load_dotenv(ENV_FILE_PATH)  # 加载环境变量
+     text_llm = ChatOpenAI(
+         model="deepseek-v4-flash",  # 当前 DeepSeek 文本/工具调用模型
+         api_key=os.getenv("DEEPSEEK_API_KEY"),
+         base_url="https://api.deepseek.com/v1",
+         temperature=0,
+     )
+-    tools = get_mcp_tools()
++    tools = get_mcp_tools(
++        SESSION_CONTEXT,
++        int(time.time()) // MCP_TOKEN_TTL_SECONDS,
++    )
+ 
+ except Exception as exc:
+     st.error(
+@@ -302,7 +513,8 @@ def get_session_history(session_id: str) -> RedisChatMessageHistory:
+     return RedisChatMessageHistory(
+         session_id=session_id,
+         url=REDIS_URL,
+-        key_prefix="rag_chat:history:",
++        key_prefix=f"{REDIS_KEY_PREFIX}:history:",
++        ttl=REDIS_TTL_SECONDS,
+     )
+ 
+ 
+@@ -587,6 +799,11 @@ def initialize_session_state() -> None:
+     st.session_state.setdefault("role_for_prompt", "beginner")
+     st.session_state.setdefault("messages", [])
+     st.session_state.setdefault("last_retrieved_docs", [])
++    context_key = SESSION_CONTEXT.redis_session_id
++    if st.session_state.get("active_context_key") != context_key:
++        st.session_state.messages = []
++        st.session_state.last_retrieved_docs = []
++        st.session_state.active_context_key = context_key
+ 
+ 
+ initialize_session_state()
+@@ -594,16 +811,41 @@ st.title("Matplotlib 课程智能助手")
+ 
+ with st.sidebar:
+     st.subheader("控制面板")
++    st.caption(f"用户：{SESSION_CONTEXT.user_id}")
++    allowed_kbs = allowed_knowledge_bases(SESSION_CONTEXT.user_id)
++    st.selectbox(
++        "知识库",
++        options=allowed_kbs,
++        key="knowledge_base_id",
++    )
++
++    if st.button("新建会话", width="stretch"):
++        st.session_state.browser_session_id = secrets.token_urlsafe(24)
++        st.session_state.messages = []
++        st.session_state.last_retrieved_docs = []
++        st.session_state.pop("active_context_key", None)
++        st.rerun()
++
+     if st.button("清空对话历史", width="stretch"):
+         st.session_state.messages = []
+         st.session_state.last_retrieved_docs = []
+-        get_session_history(SESSION_ID).clear()
++        session_id = SESSION_CONTEXT.redis_session_id
++        get_session_history(session_id).clear()
+         redis_client.delete(
+-            f"rag_chat:summary:{SESSION_ID}",
+-            f"rag_chat:summary_until:{SESSION_ID}",
++            f"{REDIS_KEY_PREFIX}:summary:{session_id}",
++            f"{REDIS_KEY_PREFIX}:summary_until:{session_id}",
+         )
+         st.rerun()
+ 
++    if st.button("退出登录", width="stretch"):
++        st.session_state.pop("authenticated_user_id", None)
++        st.session_state.pop("authenticated_token_hash", None)
++        st.session_state.pop("active_context_key", None)
++        st.session_state.browser_session_id = secrets.token_urlsafe(24)
++        st.session_state.messages = []
++        st.session_state.last_retrieved_docs = []
++        st.rerun()
++
+     st.subheader("角色设定")
+     role_label = st.radio(
+         "请选择回答难度",
+@@ -674,7 +916,11 @@ if prompt := st.chat_input("请输入你的问题...", submit_mode="disable"):
+                         {"question": prompt},
+                         config={
+                             "configurable": {
+-                                "session_id": SESSION_ID,
++                                "session_id": SESSION_CONTEXT.redis_session_id,
++                                "user_id": SESSION_CONTEXT.user_id,
++                                "knowledge_base_id": (
++                                    SESSION_CONTEXT.knowledge_base_id
++                                ),
+                                 "user_role": (
+                                     st.session_state.role_for_prompt
+                                 ),
+@@ -696,7 +942,8 @@ if prompt := st.chat_input("请输入你的问题...", submit_mode="disable"):
+ 
+     st.session_state.messages.append((prompt, answer))
+     try:
+-        compact_redis_history(SESSION_ID)
++        compact_redis_history(SESSION_CONTEXT.redis_session_id)
++        refresh_session_ttl(SESSION_CONTEXT.redis_session_id)
+     except Exception as exc:
+         st.warning(f"对话已完成，但 Redis 历史压缩失败：{exc}")
+ 

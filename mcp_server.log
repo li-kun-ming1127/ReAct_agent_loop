@@ -1,0 +1,57 @@
+2026-08-14 16:02:55,538 | INFO | matplotlib_mcp_server | 正在预热私有 PDF Multi-Vector 索引...
+2026-08-14 16:02:55,548 | INFO | matplotlib_mcp_server | 正在加载嵌入模型：D:\pycharm\langchain\models\text2vec-base-chinese
+2026-08-14 16:02:55,826 | INFO | matplotlib_mcp_server | 开始构建持久 Multi-Vector 索引：matplotlib_course_mv_bc79e6f3513f
+2026-08-14 16:02:55,837 | INFO | matplotlib_mcp_server | 解析 PDF：第一回：Matplotlib初识.pdf（4 页）
+2026-08-14 16:03:00,450 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=1230
+2026-08-14 16:03:04,419 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=1300
+2026-08-14 16:03:08,390 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=1415
+2026-08-14 16:03:10,225 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=129
+2026-08-14 16:03:10,235 | INFO | matplotlib_mcp_server | PDF 抽取完成：第一回：Matplotlib初识.pdf，文本=7，表格=0，图片=6
+2026-08-14 16:03:10,246 | INFO | matplotlib_mcp_server | 解析 PDF：第二回：艺术画笔见乾坤.pdf（13 页）
+2026-08-14 16:03:14,993 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=1288
+2026-08-14 16:03:19,382 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=1667
+2026-08-14 16:03:22,398 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=899
+2026-08-14 16:03:25,600 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=1064
+2026-08-14 16:03:31,061 | INFO | matplotlib_mcp_server | 第 5 页判定为扫描/低文本页，OCR 字符数=1482
+2026-08-14 16:03:35,305 | INFO | matplotlib_mcp_server | 第 6 页判定为扫描/低文本页，OCR 字符数=1405
+2026-08-14 16:03:39,063 | INFO | matplotlib_mcp_server | 第 7 页判定为扫描/低文本页，OCR 字符数=1239
+2026-08-14 16:03:43,483 | INFO | matplotlib_mcp_server | 第 8 页判定为扫描/低文本页，OCR 字符数=1529
+2026-08-14 16:03:47,548 | INFO | matplotlib_mcp_server | 第 9 页判定为扫描/低文本页，OCR 字符数=1503
+2026-08-14 16:03:51,273 | INFO | matplotlib_mcp_server | 第 10 页判定为扫描/低文本页，OCR 字符数=1414
+2026-08-14 16:03:57,216 | INFO | matplotlib_mcp_server | 第 11 页判定为扫描/低文本页，OCR 字符数=1623
+2026-08-14 16:04:02,906 | INFO | matplotlib_mcp_server | 第 12 页判定为扫描/低文本页，OCR 字符数=1775
+2026-08-14 16:04:06,865 | INFO | matplotlib_mcp_server | 第 13 页判定为扫描/低文本页，OCR 字符数=1178
+2026-08-14 16:04:06,943 | INFO | matplotlib_mcp_server | PDF 抽取完成：第二回：艺术画笔见乾坤.pdf，文本=23，表格=0，图片=21
+2026-08-14 16:04:06,947 | INFO | matplotlib_mcp_server | 解析 PDF：第三回：布局格式定方圆.pdf（5 页）
+2026-08-14 16:04:11,523 | INFO | matplotlib_mcp_server | 第 1 页判定为扫描/低文本页，OCR 字符数=2034
+2026-08-14 16:04:13,964 | INFO | matplotlib_mcp_server | 第 2 页判定为扫描/低文本页，OCR 字符数=612
+2026-08-14 16:04:19,010 | INFO | matplotlib_mcp_server | 第 3 页判定为扫描/低文本页，OCR 字符数=3687
+2026-08-14 16:04:21,435 | INFO | matplotlib_mcp_server | 第 4 页判定为扫描/低文本页，OCR 字符数=663
+2026-08-14 16:04:23,532 | INFO | matplotlib_mcp_server | 第 5 页判定为扫描/低文本页，OCR 字符数=808
+2026-08-14 16:04:23,582 | INFO | matplotlib_mcp_server | PDF 抽取完成：第三回：布局格式定方圆.pdf，文本=12，表格=0，图片=11
+2026-08-14 16:04:23,898 | WARNING | matplotlib_mcp_server | 未完整配置 VISION_MODEL/VISION_MODEL_BASE_URL/VISION_API_KEY，图片使用 OCR 文本化回退，扫描表格不会结构化恢复。
+2026-08-14 16:08:20,355 | INFO | matplotlib_mcp_server | Multi-Vector 索引构建完成：{'text': 42, 'table': 0, 'image': 38, 'parents': 80, 'vectors': 122}
+2026-08-14 16:08:20,363 | INFO | matplotlib_mcp_server | MCP 服务启动：http://127.0.0.1:8000/mcp
+2026-08-14 16:13:15,792 | INFO | matplotlib_mcp_server | 收到知识库检索请求：subplot 子图 布局 使用
+2026-08-14 16:13:15,849 | INFO | matplotlib_mcp_server | 检索完成：query='subplot 子图 布局 使用'，结果=6
+2026-08-14 16:14:32,882 | INFO | matplotlib_mcp_server | 收到停止信号，MCP 服务已正常关闭。
+2026-08-14 17:11:26,642 | INFO | matplotlib_mcp_server | 正在预热私有 PDF Multi-Vector 索引...
+2026-08-14 17:11:26,653 | INFO | matplotlib_mcp_server | 正在加载嵌入模型：D:\pycharm\langchain\models\text2vec-base-chinese
+2026-08-14 17:11:26,939 | INFO | matplotlib_mcp_server | 复用持久 Multi-Vector 索引：collection=matplotlib_course_mv_bc79e6f3513f，向量=122
+2026-08-14 17:11:26,939 | INFO | matplotlib_mcp_server | MCP 服务启动：http://127.0.0.1:8000/mcp
+2026-08-14 17:20:58,048 | INFO | matplotlib_mcp_server | 正在预热私有 PDF Multi-Vector 索引...
+2026-08-14 17:20:58,051 | INFO | matplotlib_mcp_server | 正在加载嵌入模型：D:\pycharm\langchain\models\text2vec-base-chinese
+2026-08-14 17:20:58,376 | INFO | matplotlib_mcp_server | 复用持久 Multi-Vector 索引：collection=matplotlib_course_mv_bc79e6f3513f，向量=122
+2026-08-14 17:20:58,376 | INFO | matplotlib_mcp_server | MCP 服务启动：http://127.0.0.1:8000/mcp
+2026-08-14 17:28:05,626 | INFO | matplotlib_mcp_server | 正在预热私有 PDF Multi-Vector 索引...
+2026-08-14 17:28:05,626 | INFO | matplotlib_mcp_server | 正在加载嵌入模型：D:\pycharm\langchain\models\text2vec-base-chinese
+2026-08-14 17:28:05,918 | INFO | matplotlib_mcp_server | 复用持久 Multi-Vector 索引：collection=matplotlib_course_mv_bc79e6f3513f，向量=122
+2026-08-14 17:28:05,918 | INFO | matplotlib_mcp_server | MCP 服务启动：http://127.0.0.1:8000/mcp
+2026-08-14 17:51:35,314 | INFO | matplotlib_mcp_server | 收到知识库检索请求：Matplotlib是什么
+2026-08-14 17:51:37,809 | INFO | matplotlib_mcp_server | RAG Fusion generated 3 queries for 'Matplotlib是什么': ['什么是Matplotlib及其主要功能', 'Matplotlib pyplot 常用函数使用方法', 'Matplotlib 数据可视化 实践示例']
+2026-08-14 17:51:37,976 | INFO | matplotlib_mcp_server | RAG Fusion retrieval query='什么是Matplotlib及其主要功能' hits=7
+2026-08-14 17:51:37,980 | INFO | matplotlib_mcp_server | RAG Fusion retrieval query='Matplotlib 数据可视化 实践示例' hits=8
+2026-08-14 17:51:37,982 | INFO | matplotlib_mcp_server | RAG Fusion retrieval query='Matplotlib pyplot 常用函数使用方法' hits=8
+2026-08-14 17:51:37,982 | INFO | matplotlib_mcp_server | RAG Fusion complete original='Matplotlib是什么' queries=3 fused=8 elapsed_ms=173.2
+2026-08-14 17:51:37,982 | INFO | matplotlib_mcp_server | 检索完成：query='Matplotlib是什么'，结果=8
+2026-08-14 17:51:37,984 | INFO | matplotlib_mcp_server | RAG Fusion response original='Matplotlib是什么' queries=['什么是Matplotlib及其主要功能', 'Matplotlib pyplot 常用函数使用方法', 'Matplotlib 数据可视化 实践示例'] results=8

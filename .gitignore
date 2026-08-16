@@ -1,0 +1,28 @@
+# Python
+venv312/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Secrets
+.env
+*.env
+.env.*
+!.env.example
+
+# Local data and vector stores
+data/
+chroma/
+chroma_db/
+*.sqlite
+*.db
+
+# Runtime files
+*.lock
+*.tmp
+
+# Optional: exclude raw logs if they may contain private questions
+# *.log
+# 向量存储和模型缓存（运行时生成）
+docs/multivector/matplotlib_v2/docstore/
+docs/multivector/matplotlib_v2/model_cache/

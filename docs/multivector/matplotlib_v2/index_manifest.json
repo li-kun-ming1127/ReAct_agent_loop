@@ -1,0 +1,36 @@
+{
+  "schema_version": "multivector-v2",
+  "fingerprint": "bc79e6f3513f8b8db7f46794d558b4eb6e90b91250b0542be8f668080316493f",
+  "collection_name": "matplotlib_course_mv_bc79e6f3513f",
+  "embedding_model": "D:\\pycharm\\langchain\\models\\text2vec-base-chinese",
+  "text_summary_model": "deepseek-v4-flash",
+  "vision_model": "",
+  "model_enrichment_enabled": true,
+  "pdf_files": [
+    {
+      "path": "D:\\pycharm\\langchain\\data\\第一回：Matplotlib初识.pdf",
+      "name": "第一回：Matplotlib初识.pdf",
+      "size": 1169371,
+      "modified_ns": 1785653597885320200
+    },
+    {
+      "path": "D:\\pycharm\\langchain\\data\\第二回：艺术画笔见乾坤.pdf",
+      "name": "第二回：艺术画笔见乾坤.pdf",
+      "size": 4768300,
+      "modified_ns": 1785664312087965300
+    },
+    {
+      "path": "D:\\pycharm\\langchain\\data\\第三回：布局格式定方圆.pdf",
+      "name": "第三回：布局格式定方圆.pdf",
+      "size": 1942765,
+      "modified_ns": 1785664522658284100
+    }
+  ],
+  "stats": {
+    "text": 42,
+    "table": 0,
+    "image": 38,
+    "parents": 80,
+    "vectors": 122
+  }
+}

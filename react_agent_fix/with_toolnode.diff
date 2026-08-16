@@ -1,0 +1,279 @@
+﻿diff --git "a/C:\\Users\\\346\235\216\345\235\244\346\230\216\\Desktop\\\345\244\247\346\250\241\345\236\213\351\241\271\347\233\256\346\200\273\347\273\223\344\270\216\350\257\204\344\273\267\\react_agent_fix\\ReAct_agent_loop.original.py" "b/C:\\Users\\\346\235\216\345\235\244\346\230\216\\Desktop\\\345\244\247\346\250\241\345\236\213\351\241\271\347\233\256\346\200\273\347\273\223\344\270\216\350\257\204\344\273\267\\react_agent_fix\\ReAct_agent_loop_with_toolnode.py"
+index 24e8ea7..1829621 100644
+--- "a/C:\\Users\\\346\235\216\345\235\244\346\230\216\\Desktop\\\345\244\247\346\250\241\345\236\213\351\241\271\347\233\256\346\200\273\347\273\223\344\270\216\350\257\204\344\273\267\\react_agent_fix\\ReAct_agent_loop.original.py"
++++ "b/C:\\Users\\\346\235\216\345\235\244\346\230\216\\Desktop\\\345\244\247\346\250\241\345\236\213\351\241\271\347\233\256\346\200\273\347\273\223\344\270\216\350\257\204\344\273\267\\react_agent_fix\\ReAct_agent_loop_with_toolnode.py"
+@@ -165,6 +165,15 @@ def _sync_discover_mcp_tools():
+         loop.close()
+ 
+ 
++def run_coroutine_sync(coroutine):
++    """在 Streamlit 同步脚本中运行异步 Agent，确保 MCP 工具走 ainvoke。"""
++    loop = asyncio.new_event_loop()
++    try:
++        return loop.run_until_complete(coroutine)
++    finally:
++        loop.close()
++
++
+ @st.cache_resource(show_spinner="正在连接本机 MCP 知识库服务...")
+ def get_mcp_tools():
+     discovered_tools = _sync_discover_mcp_tools()
+@@ -190,15 +199,29 @@ try:
+     tools = get_mcp_tools()
+     # 构建工具描述向量库，用于解决“工具选择错误”
+     tool_docs = [
+-        Document(page_content=tool.description or tool.name, metadata={"name": tool.name})
++        Document(
++            page_content=tool.description or tool.name,
++            metadata={"name": tool.name, "catalog": "mcp_tools"},
++        )
+         for tool in tools
+     ]
+-    tool_vectorstore = Chroma.from_documents(documents=tool_docs, embedding=embedding)
++    # 使用独立 collection，避免和 few-shot 示例的默认 Chroma collection 混在一起。
++    tool_vectorstore = Chroma.from_documents(
++        documents=tool_docs,
++        embedding=embedding,
++        collection_name="react_agent_mcp_tools",
++    )
+ 
+ 
+     def get_relevant_tools(query: str) -> list:
+         docs = tool_vectorstore.similarity_search(query, k=2)
+-        relevant_tool_names = {doc.metadata["name"] for doc in docs}
++        available_tool_names = {tool.name for tool in tools}
++        # metadata.get() 是本次 KeyError('name') 的直接修复；同时过滤非工具文档。
++        relevant_tool_names = {
++            name
++            for doc in docs
++            if (name := doc.metadata.get("name")) in available_tool_names
++        }
+         # 保证核心检索工具永不丢失
+         relevant_tool_names.add("search_matplotlib_knowledge")
+         return [tool for tool in tools if tool.name in relevant_tool_names]
+@@ -381,6 +404,16 @@ def compact_redis_history(session_id: str) -> None:
+ 
+ 
+ logger = logging.getLogger(__name__)
++if not logger.handlers:
++    logger.setLevel(logging.INFO)
++    log_handler = logging.FileHandler(
++        Path(__file__).with_suffix(".log"),
++        encoding="utf-8",
++    )
++    log_handler.setFormatter(
++        logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
++    )
++    logger.addHandler(log_handler)
+ 
+ def safe_parse_tool_result(tool_output) -> list[dict]:
+     """安全地把 MCP 工具的返回结果解析为文档字典列表。
+@@ -417,6 +450,31 @@ def safe_parse_tool_result(tool_output) -> list[dict]:
+ 
+     return data
+ 
++
++def documents_from_tool_messages(messages: list) -> list[Document]:
++    """从本轮搜索 ToolMessage 中恢复来源文档，供 Streamlit 侧栏展示。"""
++    documents: list[Document] = []
++    seen_content: set[str] = set()
++    for message in messages:
++        if not isinstance(message, ToolMessage):
++            continue
++        if getattr(message, "name", None) != "search_matplotlib_knowledge":
++            continue
++        for item in safe_parse_tool_result(message):
++            if not isinstance(item, dict) or "content" not in item:
++                continue
++            content = item["content"]
++            if content in seen_content:
++                continue
++            seen_content.add(content)
++            documents.append(
++                Document(
++                    page_content=content,
++                    metadata=item.get("metadata", {}),
++                )
++            )
++    return documents
++
+ def rag_fusion_retrieve(original_question: str) -> tuple[str, list[Document], list[str]]:
+     # 1. 生成多角度查询（保持不变）
+     system_prompt = (
+@@ -528,124 +586,10 @@ def agent_node(state: AgentState, config: RunnableConfig):
+     # 使用动态绑定的工具进行推理
+     response = llm_with_relevant_tools.invoke([SystemMessage(content=system_prompt), *messages])
+ 
+-    # =============== 工具调用处理（终极兼容修复） ===============
++    # AIMessage.tool_calls 已由 LangChain 标准化为 ToolNode 所需的
++    # name / args / id 结构。不要重新组装，否则容易丢失协议字段。
+     if response.tool_calls:
+         print("工具调用原始结构：", type(response.tool_calls[0]), response.tool_calls[0])
+-        # 强制统一为标准格式：顶层必须有 name / args / id
+-        normalized_tool_calls = []
+-        for tc in response.tool_calls:
+-            # 兼容 LangChain ToolCall 对象
+-            if hasattr(tc, "name"):
+-                normalized = {
+-                    "name": tc.name,
+-                    "args": tc.args,
+-                    "id": tc.id
+-                }
+-            # 兼容字典格式
+-            elif isinstance(tc, dict):
+-                if "name" in tc:
+-                    normalized = tc
+-                elif "function" in tc:
+-                    # 处理 OpenAI/DeepSeek 原生嵌套格式
+-                    func_info = tc["function"]
+-                    args_data = func_info["arguments"]
+-                    # 参数字符串转字典
+-                    if isinstance(args_data, str):
+-                        try:
+-                            args_data = json.loads(args_data)
+-                        except json.JSONDecodeError:
+-                            pass
+-                    normalized = {
+-                        "name": func_info["name"],
+-                        "args": args_data,
+-                        "id": tc.get("id", "call_default")
+-                    }
+-                else:
+-                    continue
+-            else:
+-                continue
+-            normalized_tool_calls.append(normalized)
+-
+-        # 用标准化后的结果重建消息
+-        response = AIMessage(content=response.content, tool_calls=normalized_tool_calls)
+-
+-        # 下面是你之前写好的兼容逻辑，保持不变
+-        if len(response.tool_calls) == 1:
+-            tool_call = response.tool_calls[0]
+-
+-            # 1. 兼容不同格式获取工具名称 (防 KeyError: 'name')
+-            tool_name = tool_call.get("name")
+-            if tool_name is None:
+-                tool_name = tool_call.get("function", {}).get("name")
+-
+-            if tool_name == "search_matplotlib_knowledge":
+-                # 2. 兼容不同格式获取 query 参数
+-                args = tool_call.get("args") or tool_call.get("arguments")
+-                query_param = None
+-
+-                if isinstance(args, dict):
+-                    query_param = args.get("query")
+-                elif isinstance(args, str):
+-                    try:
+-                        args_dict = json.loads(args)
+-                        query_param = args_dict.get("query")
+-                    except (json.JSONDecodeError, TypeError):
+-                        query_param = None
+-
+-                if not query_param:
+-                    return {
+-                        "messages": [AIMessage(content="MCP 搜索工具调用失败：未能正确解析查询参数，请稍后重新提问。")],
+-                        "step_count": state["step_count"] + 1,
+-                        "retrieved_docs": state.get("retrieved_docs", []),
+-                    }
+-
+-                fusion_context, fusion_docs, image_bases = rag_fusion_retrieve(query_param)
+-
+-                # ---------------- 后续处理（原封不动） ----------------
+-                def process_document(doc):
+-                    doc_type = doc.metadata.get("type", "text")
+-                    if doc_type == "text":
+-                        return doc.page_content
+-                    elif doc_type == "table":
+-                        return table_to_text(doc.page_content)
+-                    elif doc_type == "image":
+-                        return image_to_text(doc.page_content)
+-                    else:
+-                        return doc.page_content
+-
+-                with ThreadPoolExecutor(max_workers=5) as executor:
+-                    future_to_index = {executor.submit(process_document, doc): i for i, doc in enumerate(fusion_docs)}
+-                    processed_texts = [None] * len(fusion_docs)
+-                    for future in as_completed(future_to_index):
+-                        index = future_to_index[future]
+-                        processed_texts[index] = future.result()
+-
+-                full_textual_context = "\n\n".join(processed_texts)
+-
+-                doc_summary_prompt = ChatPromptTemplate.from_messages([
+-                    ("system", "请用一段话总结以下课程资料的核心内容，保留关键技术点和示例。"),
+-                    ("human", "{context}")
+-                ])
+-                summary_chain_local = doc_summary_prompt | text_llm | StrOutputParser()
+-                doc_summary = summary_chain_local.invoke({"context": full_textual_context})
+-                set_cached_summary(session_id, doc_summary, 0)
+-                final_system_prompt = f"""{system_prompt}
+-
+-   【课程资料核心摘要】
+-   {doc_summary}"""
+-
+-                user_prompt = f"用户的问题：{user_question}\n\n【课程资料汇总】：\n{full_textual_context}"
+-                final_response = text_llm.invoke(
+-                    [SystemMessage(content=final_system_prompt), HumanMessage(content=user_prompt)]
+-                )
+-
+-                return {
+-                    "messages": [AIMessage(content=final_response.content)],
+-                    "step_count": state["step_count"] + 1,
+-                    "retrieved_docs": fusion_docs,
+-                }
+-
+-        # 如果工具调用不是 search_matplotlib_knowledge，或者有多个工具，按原样返回
+         return {
+             "messages": [response],
+             "step_count": state["step_count"] + 1,
+@@ -653,10 +597,13 @@ def agent_node(state: AgentState, config: RunnableConfig):
+         }
+     else:
+         # 没有触发工具调用的纯对话
++        retrieved_docs = documents_from_tool_messages(
++            state["messages"][state["turn_start"]:]
++        )
+         return {
+             "messages": [response],
+             "step_count": state["step_count"] + 1,
+-            "retrieved_docs": state.get("retrieved_docs", []),
++            "retrieved_docs": retrieved_docs or state.get("retrieved_docs", []),
+         }
+ def should_continue(state: AgentState):
+     if state["step_count"] >= state["max_steps"]:
+@@ -830,7 +777,9 @@ if prompt := st.chat_input("请输入你的问题..."):
+         with st.spinner("思考中..."):
+             monitor = AgentMonitorHandler()
+             try:
+-                result = rag_chain_with_memory.invoke(
++                # MCP adapter 提供的是异步工具；整张图必须使用 ainvoke，
++                # ToolNode 才会选择 tool.ainvoke() 而不是同步 tool.invoke()。
++                result = run_coroutine_sync(rag_chain_with_memory.ainvoke(
+                         {"question": prompt},
+                         config={
+                             "configurable": {
+@@ -841,7 +790,7 @@ if prompt := st.chat_input("请输入你的问题..."):
+                             },
+                             "callbacks": [monitor],
+                         },
+-                    )
++                    ))
+                 answer = result["answer"]
+ 
+                 # 【核心修改点】不再使用 filter_document_by_filename 二次检索
+@@ -849,6 +798,7 @@ if prompt := st.chat_input("请输入你的问题..."):
+                 st.session_state.last_retrieved_docs = result.get("retrieved_docs", [])
+ 
+             except Exception as exc:
++                logger.exception("处理 Streamlit 请求失败，question=%r", prompt)
+                 answer = f"处理请求时出错：{exc}"
+                 st.session_state.last_retrieved_docs = []
+             st.write(answer)
+@@ -863,4 +813,4 @@ if prompt := st.chat_input("请输入你的问题..."):
+ # '''启动方法
+ # cd D:\pycharm\langchain\LangChain_project
+ # streamlit run ReAct_agent_loop.py
+-# '''
+\ No newline at end of file
++# '''
