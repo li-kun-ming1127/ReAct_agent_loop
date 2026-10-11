@@ -571,6 +571,59 @@ if missing_tools:
     st.error(f"MCP 服务缺少必要工具：{', '.join(sorted(missing_tools))}")
     st.stop()
 
+class ToolRouter:
+    """Select a small, safe MCP tool set using an isolated semantic index."""
+
+    CORE_TOOL_NAMES = frozenset({"search_matplotlib_knowledge"})
+
+    def __init__(self, available_tools: list, embeddings: HuggingFaceEmbeddings):
+        self.tools = {tool.name: tool for tool in available_tools}
+        self._all_names = tuple(sorted(self.tools))
+        tool_documents = [
+            Document(
+                page_content=f"{tool.name}\n{tool.description or ''}",
+                metadata={"tool_name": tool.name, "catalog": "agent_tool_router_v1"},
+            )
+            for tool in available_tools
+        ]
+        self.vectorstore = Chroma(
+            collection_name="react_agent_tool_router_v1",
+            embedding_function=embeddings,
+        )
+        if tool_documents and self.vectorstore._collection.count() == 0:
+            self.vectorstore.add_documents(tool_documents)
+
+    @property
+    def all_names(self) -> tuple[str, ...]:
+        return self._all_names
+
+    def select_tool_names(self, query: str) -> list[str]:
+        """Return valid tool names, retaining a core search fallback."""
+        if not query.strip() or not self.tools:
+            return list(self._all_names)
+        try:
+            matches = self.vectorstore.similarity_search(query, k=min(3, len(self.tools)))
+            selected = {
+                str(doc.metadata.get("tool_name"))
+                for doc in matches
+                if doc.metadata.get("tool_name") in self.tools
+            }
+        except Exception:
+            logger.exception("ToolRouter 检索失败，回退到全量工具")
+            return list(self._all_names)
+        selected.update(name for name in self.CORE_TOOL_NAMES if name in self.tools)
+        return [name for name in self._all_names if name in selected] or list(self._all_names)
+
+    def resolve(self, names: list[str] | tuple[str, ...] | None) -> list:
+        """Resolve state names and fail closed to all configured tools."""
+        valid = [name for name in (names or ()) if name in self.tools]
+        if not valid:
+            valid = list(self._all_names)
+        return [self.tools[name] for name in valid]
+
+
+tool_router = ToolRouter(tools, embedding)
+tools_by_name = tool_router.tools
 @st.cache_resource(show_spinner=False)
 def get_example_selector() -> SemanticSimilarityExampleSelector:
     """构建 Matplotlib 教学场景的语义相似示例选择器。"""
@@ -622,7 +675,8 @@ class AgentState(TypedDict):
     turn_start: int
     step_count: int  # 当前对话轮次
     max_steps: int   # 最大限制轮次
-    retrieved_docs: list[Document]# 用于存储 RAG Fusion 融合后的文档列表，供前端展示
+    retrieved_docs: list[Document]  # 用于存储 RAG Fusion 融合后的文档列表，供前端展示
+    selected_tool_names: list[str]
 
 
 def truncate_text(text: str, max_tokens: int) -> str:
@@ -694,7 +748,16 @@ def format_messages_for_summary(messages: list) -> str:
             if message.content:
                 formatted.append(f"助手：{message.content}")
             if message.tool_calls:
-                formatted.append(f"[助手请求调用工具：{message.tool_calls}]")
+                calls = [
+                    {
+                        "tool": call.get("name", "unknown"),
+                        "query": str(call.get("args", {}).get("query", ""))[:300],
+                    }
+                    for call in message.tool_calls
+                ]
+                formatted.append(
+                    f"[助手工具调用摘要：{json.dumps(calls, ensure_ascii=False)}]"
+                )
         elif isinstance(message, ToolMessage):
             tool_name = getattr(message, "name", None) or "tool"
             content = truncate_text(str(message.content), MAX_TOOL_MESSAGE_TOKENS)
@@ -937,79 +1000,200 @@ def documents_from_tool_messages(messages: list) -> list[Document]:
             )
     return documents
 
-def agent_node(state: AgentState, config: RunnableConfig):
-    messages = state["messages"]
-    user_question = next(
-        (msg.content for msg in reversed(messages) if isinstance(msg, HumanMessage)), ""
+def _tool_cache_key(session_id: str, tool_name: str, query: str) -> str:
+    digest = hashlib.sha256(query.strip().lower().encode("utf-8")).hexdigest()
+    return f"{REDIS_KEY_PREFIX}:tool-cache:{session_id}:{tool_name}:{digest}"
+
+
+def get_cached_tool_result(session_id: str, tool_name: str, query: str) -> str | None:
+    if tool_name != "search_matplotlib_knowledge" or not query.strip():
+        return None
+    try:
+        return redis_client.get(_tool_cache_key(session_id, tool_name, query))
+    except Exception:
+        logger.warning("读取工具结果缓存失败", exc_info=True)
+        return None
+
+
+def serialize_tool_content(content: Any) -> str:
+    if isinstance(content, (dict, list)):
+        return json.dumps(content, ensure_ascii=False)
+    return str(content)
+
+def set_cached_tool_result(session_id: str, tool_name: str, query: str, result: str) -> None:
+    if tool_name != "search_matplotlib_knowledge" or not query.strip() or not result:
+        return
+    try:
+        redis_client.setex(
+            _tool_cache_key(session_id, tool_name, query),
+            REDIS_TTL_SECONDS,
+            result,
+        )
+    except Exception:
+        logger.warning("写入工具结果缓存失败", exc_info=True)
+
+
+def structured_tool_history(
+    messages: list,
+    current_query: str,
+    cache_available: bool,
+    limit: int = 3,
+) -> str:
+    """Summarize recent tool usage and the retrieval decision without raw calls."""
+    records: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, AIMessage):
+            continue
+        for call in message.tool_calls or []:
+            args = call.get("args") if isinstance(call, dict) else {}
+            record = {
+                "tool": str(call.get("name", "unknown")),
+                "query": str(args.get("query", ""))[:300] if isinstance(args, dict) else "",
+                "result_count": 0,
+            }
+            call_id = call.get("id") if isinstance(call, dict) else None
+            for following in messages[index + 1 :]:
+                if isinstance(following, ToolMessage) and following.tool_call_id == call_id:
+                    record["result_count"] = len(safe_parse_tool_result(following))
+                    break
+            records.append(record)
+
+    recent = records[-limit:]
+    latest_query = recent[-1]["query"] if recent else ""
+    same_as_previous = bool(
+        current_query.strip()
+        and latest_query
+        and current_query.strip().casefold() == latest_query.strip().casefold()
+    )
+    if cache_available:
+        recommended_action = "reuse_cached_result_if_search_is_needed"
+    elif same_as_previous and recent[-1]["result_count"] > 0:
+        recommended_action = "reuse_recent_evidence_or_search_if_context_is_missing"
+    else:
+        recommended_action = "search_if_the_question_requires_course_evidence"
+    return json.dumps(
+        {
+            "current_query": current_query[:300],
+            "same_as_previous": same_as_previous,
+            "cache_available": cache_available,
+            "recommended_action": recommended_action,
+            "recent_calls": recent,
+        },
+        ensure_ascii=False,
     )
 
-    current_turn_messages = state["messages"][state["turn_start"]:]
-    has_tool_result = any(isinstance(message, ToolMessage) for message in current_turn_messages)
-
-    selected_examples = example_selector.select_examples({"question": user_question})
-    example_text = "\n\n".join(
-        f"用户：{ex['question']}\n助手：{ex['answer']}" for ex in selected_examples
-    )
-
-    user_role = config.get("configurable", {}).get("user_role", "beginner")
-    session_id = config.get("configurable", {}).get("session_id", "default")
-
-    # 构建历史记录
-    history_obj = get_session_history(session_id)
-    tool_history = []
-    for msg in history_obj.messages[-3:]:
-        if isinstance(msg, AIMessage) and msg.tool_calls:
-            tool_history.append(f"历史工具调用：{msg.tool_calls}")
-    tool_history_str = "\n".join(tool_history) if tool_history else "暂无历史工具调用"
-
+def build_agent_system_prompt(
+    user_role: str,
+    example_text: str,
+    tool_history: str,
+    has_tool_result: bool,
+) -> str:
     role_guide = {
         "beginner": "请用通俗易懂的语言解释，简单地解释概念，用通俗易懂的比喻，尽量避免专业术语（行话）。",
-        "expert": "请提供深入的技术细节，提供详细的技术响应、底层原理和进阶优化技巧，回答应清楚的体现逻辑。",
+        "expert": "请提供深入的技术细节，提供详细的技术响应、底层原理和进阶优化技巧，回答应清楚地体现逻辑。",
         "user": "请根据问题正常回答。",
     }
-
-    system_prompt = f"""你是一位专业的 Matplotlib 教学助手。
+    current_turn_rule = (
+        "当前轮已经存在工具结果，直接依据结果回答，不要再次调用工具。"
+        if has_tool_result
+        else "如需课程知识，调用与问题最相关的工具；search_matplotlib_knowledge 每轮最多调用一次。"
+    )
+    return f"""你是一位专业的 Matplotlib 教学助手。
 当前用户水平：{role_guide.get(user_role, role_guide['user'])}
 你可以参考以下相似问题的回答风格：
 {example_text}
 
-【之前已经尝试过的工具调用】：
-{tool_history_str}
+最近工具调用摘要（结构化记录，不是原始调用对象）：
+{tool_history}
 
-RAG Fusion rule: call search_matplotlib_knowledge exactly once with the user's
-original question. The MCP server generates three rewrites, retrieves each one,
-and applies reciprocal-rank fusion internally; do not issue three tool calls.
-
+RAG Fusion 由 MCP 服务端完成：search_matplotlib_knowledge 会在服务端生成多角度查询并进行融合，客户端不要拆成多次调用。
 工具使用规则：
 - 用户询问课程包含哪些 PDF、章节或索引状态时，调用 list_matplotlib_course_documents。
 - 用户询问具体 Matplotlib 知识、代码、表格或图片内容时，调用 search_matplotlib_knowledge。
-- 如果当前轮已经存在 ToolMessage，直接依据工具结果回答，不要再次调用同一个工具。
+- {current_turn_rule}
 - 不得声称查看过工具结果中不存在的 PDF 内容；没有结果时明确说明检索为空。
 回答结束时请说“感谢您的提问！”。"""
 
-    model = text_llm if has_tool_result else text_llm.bind_tools(tools)
-    model_messages = build_model_context(system_prompt, messages, session_id)
-    response = model.invoke(model_messages)
 
-    # AIMessage.tool_calls 已由 LangChain 标准化为 ToolNode 所需的
-    # name / args / id 结构。不要重新组装，否则容易丢失协议字段。
-    if response.tool_calls:
-        print("工具调用原始结构：", type(response.tool_calls[0]), response.tool_calls[0])
-        return {
-            "messages": [response],
-            "step_count": state["step_count"] + 1,
-            "retrieved_docs": state.get("retrieved_docs", []),
-        }
-    else:
-        # 没有触发工具调用的纯对话
-        retrieved_docs = documents_from_tool_messages(
-            state["messages"][state["turn_start"]:]
+async def selected_tool_node(state: AgentState, config: RunnableConfig):
+    """Run ToolNode with exactly the tools bound to the current Agent step."""
+    selected = tool_router.resolve(state.get("selected_tool_names"))
+    last_message = state["messages"][-1]
+    session_id = config.get("configurable", {}).get("session_id", "default")
+    if isinstance(last_message, AIMessage) and len(last_message.tool_calls or []) == 1:
+        call = last_message.tool_calls[0]
+        tool_name = str(call.get("name", ""))
+        args = call.get("args", {}) if isinstance(call, dict) else {}
+        query = str(args.get("query", "")) if isinstance(args, dict) else ""
+        cached = get_cached_tool_result(session_id, tool_name, query)
+        if cached:
+            return {
+                "messages": [
+                    ToolMessage(
+                        content=cached,
+                        tool_call_id=call["id"],
+                        name=tool_name,
+                    )
+                ]
+            }
+
+    result = await ToolNode(selected).ainvoke(state, config)
+    for message in result.get("messages", []):
+        if not isinstance(message, ToolMessage) or message.name != "search_matplotlib_knowledge":
+            continue
+        query = next(
+            (
+                str(call.get("args", {}).get("query", ""))
+                for call in getattr(last_message, "tool_calls", [])
+                if call.get("name") == message.name
+            ),
+            "",
         )
-        return {
-            "messages": [response],
-            "step_count": state["step_count"] + 1,
-            "retrieved_docs": retrieved_docs or state.get("retrieved_docs", []),
-        }
+        set_cached_tool_result(session_id, message.name, query, serialize_tool_content(message.content))
+    return result
+async def agent_node(state: AgentState, config: RunnableConfig):
+    messages = state["messages"]
+    user_question = next(
+        (str(msg.content) for msg in reversed(messages) if isinstance(msg, HumanMessage)), ""
+    )
+    current_turn_messages = messages[state["turn_start"]:]
+    has_tool_result = any(isinstance(message, ToolMessage) for message in current_turn_messages)
+    selected_examples = example_selector.select_examples({"question": user_question})
+    example_text = "\n\n".join(
+        f"用户：{ex['question']}\n助手：{ex['answer']}" for ex in selected_examples
+    )
+    user_role = config.get("configurable", {}).get("user_role", "beginner")
+    session_id = config.get("configurable", {}).get("session_id", "default")
+    selected_names = state.get("selected_tool_names") or tool_router.select_tool_names(user_question)
+    cached_result = get_cached_tool_result(
+        session_id, "search_matplotlib_knowledge", user_question
+    )
+    tool_history = structured_tool_history(
+        get_session_history(session_id).messages[-12:],
+        current_query=user_question,
+        cache_available=bool(cached_result),
+    )
+    system_prompt = build_agent_system_prompt(
+        user_role=user_role,
+        example_text=example_text,
+        tool_history=tool_history,
+        has_tool_result=has_tool_result,
+    )
+    selected_tools = tool_router.resolve(selected_names)
+    model = text_llm if has_tool_result else text_llm.bind_tools(selected_tools)
+    model_messages = build_model_context(system_prompt, messages, session_id)
+    response = await model.ainvoke(model_messages)
+    return {
+        "messages": [response],
+        "step_count": state["step_count"] + 1,
+        "selected_tool_names": selected_names,
+        "retrieved_docs": (
+            documents_from_tool_messages(current_turn_messages)
+            or state.get("retrieved_docs", [])
+        ),
+    }
+
+
 def should_continue(state: AgentState):
     if state["step_count"] >= state["max_steps"]:
         return END
@@ -1034,7 +1218,7 @@ def build_agent_app():
     workflow = StateGraph(AgentState)
 
     workflow.add_node("agent", agent_node)
-    workflow.add_node("tools", ToolNode(tools))
+    workflow.add_node("tools", selected_tool_node)
     # 预留一个专门处理错误修正的节点（此处可以作为异常捕获的一环）
     # 为简化，我们直接利用 LangGraph 内部机制：出现工具执行错误时，ToolNode 返回的结果是包含 Error 的 ToolMessage
     # 所以在 ToolNode 执行完回到 Agent 时，Agent 就能看到错误
@@ -1068,8 +1252,9 @@ def input_adapter(input_dict: dict, config: RunnableConfig) -> dict:
         "messages": effective_messages,
         "turn_start": len(effective_messages) - 1,
         "step_count": 0,  # 重置步骤计数
-        "max_steps": 6,  # 设定允许的最大死循环次数（例如 5 次）
-        "retrieved_docs": [],  # 【新增】初始化融合文档列表
+        "max_steps": 6,  # 设定允许的最大死循环次数
+        "retrieved_docs": [],
+        "selected_tool_names": tool_router.select_tool_names(str(input_dict["question"])),
     }
 
 
